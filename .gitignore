@@ -1,0 +1,20 @@
+# Dados brutos (>3GB, fora do versionamento)
+data/
+Dados/raw_data.csv
+Dados/clean_data.csv
+Dados/abt.csv
+
+# Artefatos de modelo
+artifacts/
+*.pkl
+*.joblib
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Sistema
+.DS_Store
+*.log

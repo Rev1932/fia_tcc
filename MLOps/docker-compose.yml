@@ -1,0 +1,32 @@
+# Sobe o serviço de predição (API REST) e o dashboard (Streamlit).
+# Os artefatos do modelo (artifacts/) são montados a partir do host.
+# Uso: docker compose -f MLOps/docker-compose.yml up --build
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: MLOps/Dockerfile
+    image: home-credit-scoring:latest
+    container_name: hc-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../artifacts:/app/artifacts:ro
+    command: uvicorn MLOps.app.api:app --host 0.0.0.0 --port 8000
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').getcode()==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  dashboard:
+    image: home-credit-scoring:latest
+    container_name: hc-dashboard
+    depends_on:
+      - api
+    ports:
+      - "8501:8501"
+    volumes:
+      - ../artifacts:/app/artifacts:ro
+    command: streamlit run MLOps/app/streamlit_app.py --server.port 8501 --server.address 0.0.0.0

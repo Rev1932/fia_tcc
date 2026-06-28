@@ -1,0 +1,22 @@
+# Core data
+pandas==3.0.3
+numpy==2.4.6
+pyarrow==24.0.0
+PyYAML==6.0.3
+joblib==1.5.3
+
+# Modelagem
+scikit-learn==1.9.0
+lightgbm==4.6.0
+shap==0.52.0
+
+# Análise / notebooks
+matplotlib==3.11.0
+jupyter==1.1.1
+notebook==7.6.0
+
+# Serviço de predição
+fastapi==0.138.1
+uvicorn==0.49.0
+streamlit==1.58.0
+pydantic==2.13.4

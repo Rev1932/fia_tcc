@@ -1,0 +1,50 @@
+# Configuração de modelagem — credit scoring Home Credit
+# Hiperparâmetros, split e régua de decisão por custo de negócio.
+
+paths:
+  abt: Dados/abt.csv
+  model_out: artifacts/model.joblib
+  metrics_out: artifacts/metrics.json
+  feature_meta_out: artifacts/feature_metadata.json
+
+target: TARGET
+id_col: SK_ID_CURR
+
+split:
+  test_size: 0.2
+  valid_size: 0.2
+  random_state: 42
+  stratify: true
+
+# Baseline interpretável
+baseline:
+  model: logistic_regression
+  params:
+    max_iter: 1000
+    C: 1.0
+    class_weight: balanced
+
+# Modelo campeão
+champion:
+  model: lightgbm
+  params:
+    objective: binary
+    metric: auc
+    n_estimators: 2000
+    learning_rate: 0.02
+    num_leaves: 34
+    max_depth: 8
+    min_child_samples: 70
+    subsample: 0.8
+    colsample_bytree: 0.8
+    reg_alpha: 0.1
+    reg_lambda: 0.1
+    is_unbalance: true
+    random_state: 42
+    n_jobs: -1
+  early_stopping_rounds: 100
+
+# Matriz de custo para o threshold de negócio (em unidades monetárias relativas)
+business:
+  cost_false_negative: 1.0   # aprovar quem dá default -> perde o crédito
+  cost_false_positive: 0.10  # negar bom pagador -> perde margem/receita

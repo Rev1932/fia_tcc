@@ -1,0 +1,41 @@
+# Configuração do pipeline de dados — Home Credit Default Risk
+# Caminhos, parâmetros de limpeza e metadados da ABT.
+
+paths:
+  raw_dir: data/risco_fraude/home-credit-default-risk
+  application_train: application_train.csv
+  bureau: bureau.csv
+  bureau_balance: bureau_balance.csv
+  previous_application: previous_application.csv
+  pos_cash: POS_CASH_balance.csv
+  credit_card: credit_card_balance.csv
+  installments: installments_payments.csv
+  # Saídas
+  clean_data: Dados/clean_data.csv
+  abt: Dados/abt.csv
+  raw_sample: Dados/raw_data.csv
+
+target: TARGET
+id_col: SK_ID_CURR
+
+# Amostragem opcional para execução rápida (null = base completa)
+sample_n: null
+random_state: 42
+
+sanitization:
+  # Valor sentinela de DAYS_EMPLOYED (~1000 anos) -> NaN
+  days_employed_sentinel: 365243
+  # Coluna anômala: XNA em CODE_GENDER -> NaN
+  drop_gender_xna: true
+  # Clip de outliers de renda no percentil superior
+  income_clip_quantile: 0.999
+
+abt:
+  # Estatísticas usadas nas agregações por cliente
+  agg_funcs: [mean, sum, max, min, count]
+  # Ratios derivados (numerador / denominador)
+  ratios:
+    CREDIT_INCOME_RATIO: [AMT_CREDIT, AMT_INCOME_TOTAL]
+    ANNUITY_INCOME_RATIO: [AMT_ANNUITY, AMT_INCOME_TOTAL]
+    CREDIT_TERM: [AMT_ANNUITY, AMT_CREDIT]
+    EMPLOYED_AGE_RATIO: [DAYS_EMPLOYED, DAYS_BIRTH]
