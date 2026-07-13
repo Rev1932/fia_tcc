@@ -14,6 +14,7 @@ Uso: python Model/train.py [--config Model/config.yaml]
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import warnings
 from pathlib import Path
@@ -78,6 +79,10 @@ def main() -> None:
     num_cols = [c for c in X.columns if c not in cat_cols]
     print(f"[train] features: {X.shape[1]} ({len(num_cols)} num, {len(cat_cols)} cat)")
 
+    # float32 em vez de float64: metade da memória em todas as cópias
+    # (splits, ColumnTransformer, imputer) sem impacto relevante nas métricas
+    X[num_cols] = X[num_cols].astype("float32")
+
     # categóricas como 'category' (LightGBM trata nativamente)
     cat_categories = {c: list(X[c].astype("category").cat.categories) for c in cat_cols}
     for c in cat_cols:
@@ -92,6 +97,11 @@ def main() -> None:
         X_tmp, y_tmp, test_size=val_rel, random_state=sp["random_state"],
         stratify=y_tmp if sp["stratify"] else None)
     print(f"[train] treino={len(X_tr)} valid={len(X_val)} teste={len(X_test)}")
+
+    # libera as cópias grandes que não são mais usadas (df/X/X_tmp ficavam
+    # ociosas na memória durante todo o treino, duplicando os splits)
+    del df, X, X_tmp, y_tmp
+    gc.collect()
 
     metrics: dict = {}
 
@@ -150,7 +160,7 @@ def main() -> None:
     art.mkdir(exist_ok=True)
     bundle = {
         "model": champ,
-        "feature_names": list(X.columns),
+        "feature_names": list(X_tr.columns),
         "categorical_features": cat_cols,
         "cat_categories": cat_categories,
         "threshold": thr,
@@ -159,8 +169,8 @@ def main() -> None:
     joblib.dump(bundle, ROOT / cfg["paths"]["model_out"])
     with open(ROOT / cfg["paths"]["metrics_out"], "w") as f:
         json.dump(metrics, f, indent=2)
-    feat_meta = {"feature_names": list(X.columns), "numeric": num_cols,
-                 "categorical": cat_cols, "n_features": X.shape[1]}
+    feat_meta = {"feature_names": list(X_tr.columns), "numeric": num_cols,
+                 "categorical": cat_cols, "n_features": X_tr.shape[1]}
     with open(ROOT / cfg["paths"]["feature_meta_out"], "w") as f:
         json.dump(feat_meta, f, indent=2)
     print(f"[train] modelo salvo em {cfg['paths']['model_out']}")
