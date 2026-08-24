@@ -36,12 +36,22 @@ def _prepare(records: list[dict], bundle: dict) -> pd.DataFrame:
     return X
 
 
+def score_matrix(X: pd.DataFrame, bundle: dict):
+    """Probabilidade servida: a calibrada quando existe, senão a crua.
+
+    O bundle guarda os dois — o campeão cru (que o SHAP sabe explicar) e o
+    calibrador isotônico (que torna o score legível como P(default) real).
+    """
+    model = bundle.get("calibrator") or bundle["model"]
+    return model.predict_proba(X)[:, 1]
+
+
 def predict(records: list[dict] | dict, model_path: str = str(DEFAULT_MODEL)) -> list[dict]:
     if isinstance(records, dict):
         records = [records]
     bundle = load_bundle(model_path)
     X = _prepare(records, bundle)
-    proba = bundle["model"].predict_proba(X)[:, 1]
+    proba = score_matrix(X, bundle)
     thr = bundle["threshold"]
     return [
         {
