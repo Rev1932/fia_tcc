@@ -1,6 +1,6 @@
 """
 pipeline_orchestration.py — Orquestra o fluxo end-to-end:
-    raw -> clean (sanitization) -> ABT (transform) -> train (model)
+    raw -> clean (sanitization) -> ABT (transform) -> parquet/perfil -> train
 
 Uso standalone:
     python MLOps/pipeline_orchestration.py
@@ -20,6 +20,9 @@ PY = sys.executable
 STEPS = [
     ("sanitization", [PY, str(ROOT / "DataPipeline" / "data_sanitization.py")]),
     ("abt_transform", [PY, str(ROOT / "DataPipeline" / "abt_transform.py")]),
+    # Perfil das colunas para a API (nulos, min/max, cardinalidade). O parquet
+    # em si já sai do abt_transform; aqui garantimos o abt_profile.json.
+    ("profile", [PY, str(ROOT / "DataPipeline" / "to_parquet.py")]),
     ("train", [PY, str(ROOT / "Model" / "train.py")]),
 ]
 

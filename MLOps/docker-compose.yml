@@ -1,6 +1,9 @@
-# Sobe o serviço de predição (API REST) e o dashboard (Streamlit).
-# Os artefatos do modelo (artifacts/) são montados a partir do host.
+# Sobe a API de credit scoring e o dashboard.
 # Uso: docker compose -f MLOps/docker-compose.yml up --build
+#
+# Pré-requisitos no host (nesta ordem):
+#   python MLOps/pipeline_orchestration.py   -> artifacts/
+#   python DataPipeline/to_parquet.py        -> Dados/abt.parquet
 
 services:
   api:
@@ -13,20 +16,39 @@ services:
       - "8000:8000"
     volumes:
       - ../artifacts:/app/artifacts:ro
-    command: uvicorn MLOps.app.api:app --host 0.0.0.0 --port 8000
+      - ../Dados:/app/Dados:ro          # a API consulta a ABT em Parquet
+    environment:
+      HC_ABT_PARQUET: /app/Dados/abt.parquet
+      HC_SCORES_PARQUET: /app/artifacts/scores.parquet
+      HC_MODEL_PATH: /app/artifacts/model.joblib
+      HC_ARTIFACTS_DIR: /app/artifacts
+      HC_EXPLAINER_EAGER: "1"
+      HC_DUCKDB_THREADS: "4"
+      HC_DUCKDB_MEMORY_LIMIT: "2GB"
+    # 1 worker: um explainer, um pool DuckDB, memória previsível. Vários
+    # workers multiplicariam o modelo em RAM sem ganho numa demonstração.
+    command: uvicorn MLOps.app.api:app --host 0.0.0.0 --port 8000 --workers 1
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').getcode()==200 else 1)"]
-      interval: 30s
+      # Só tem significado porque /health devolve 503 quando o modelo ou os
+      # dados não carregam. A versão anterior respondia 200 sempre, então o
+      # container ficava "healthy" sem conseguir pontuar nada.
+      test: ["CMD", "python", "-c",
+             "import sys,urllib.request as u; sys.exit(0 if u.urlopen('http://localhost:8000/health', timeout=3).status == 200 else 1)"]
+      interval: 15s
       timeout: 5s
-      retries: 3
+      retries: 5
+      start_period: 60s     # carga do bundle + construção do TreeExplainer
 
   dashboard:
     image: home-credit-scoring:latest
     container_name: hc-dashboard
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     ports:
       - "8501:8501"
     volumes:
       - ../artifacts:/app/artifacts:ro
+    environment:
+      HC_API_URL: http://api:8000     # o dashboard é um cliente da API
     command: streamlit run MLOps/app/streamlit_app.py --server.port 8501 --server.address 0.0.0.0
