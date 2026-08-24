@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+*.ipynb
+Dados/
+data/
+artifacts/
+artifacts_v1_baseline/
+docs/
+tests/
+.git/
+*.pdf
+*.pptx
