@@ -1,5 +1,10 @@
 # Roteiro do Pitch — Demoday (15 min)
 
+> **Números desta versão:** rodada canônica `20260823-215024-d73d85c`, gerada de
+> `artifacts/`. Reimprima com `python Model/run_summary.py --markdown`.
+> Nenhum número aqui é digitado à mão.
+
+
 > Guia para ensaiar a apresentação em grupo, defendendo a solução como para uma banca.
 > Alinhado aos 5 slides do PPT (`docs/credit_scoring_deck.pptx`) e aos números reais
 > produzidos em `DataPipeline/exp_analysis.ipynb` e `Model/evaluation.ipynb`.
@@ -56,7 +61,7 @@ Números para citar de cabeça:
 
 ## 4. ABT (2 min)
 
-- 1 linha por `SK_ID_CURR`, agregando as 9 tabelas relacionais → **473 colunas**.
+- 1 linha por `SK_ID_CURR`, agregando as 9 tabelas relacionais → **1.020 colunas**.
 - Agregações de bureau, previous_application, POS_CASH, credit_card, installments
   (mean/sum/max/min/count) + ratios de negócio (credit/income, annuity/income).
 - Cuidado explícito com vazamento: só features conhecidas no momento do pedido de
@@ -67,13 +72,13 @@ Números para citar de cabeça:
 ## 5. Modelo (3 min)
 
 - Baseline interpretável: Regressão Logística (imputação + scaling + one-hot,
-  `class_weight=balanced`). AUC teste = **0,7712**, KS = 0,4062.
+  `class_weight=balanced`). AUC teste = **0,7776**, KS = 0,4228.
 - Campeão: LightGBM — categóricas nativas, `is_unbalance=true`, early stopping.
-  AUC teste = **0,7846**, KS = **0,4349**.
-- Controle de overfitting: AUC treino 0,883 → validação 0,781 → teste 0,785.
+  AUC teste = **0,7868**, KS = **0,4342**.
+- Controle de overfitting: AUC treino 0,8753 → validação 0,7835 → teste 0,7871.
   **Validação e teste ficam praticamente empatados** — o gap treino→validação é
   esperado (473 features), mas não vaza para o teste. Early stopping parou na
-  iteração 783.
+  iteração 507.
 - Por que LightGBM venceu: lida nativamente com nulos (que são estruturais no
   dataset, não erro) e com alta cardinalidade categórica, sem precisar de imputação
   artificial.
@@ -81,25 +86,25 @@ Números para citar de cabeça:
 ## 6. Avaliação (3 min) — bloco mais importante para a banca
 
 Performance:
-- AUC 0,785 / KS 0,435 no teste — poder de ordenação suficiente para sustentar uma
+- AUC 0,7868 / KS 0,4342 no teste — poder de ordenação suficiente para sustentar uma
   régua de decisão.
 - Threshold de negócio calibrado por matriz de custo (custo de aprovar mau pagador =
-  10x o custo de negar bom pagador) → taxa de aprovação de ~69–72%.
+  10x o custo de negar bom pagador) → corte de 0,09 e taxa de aprovação de 68,7%.
 
 Explicabilidade (SHAP):
 - Traduz o modelo caixa-preta em contribuição por variável, por cliente — essencial
   pra justificar uma negação de crédito (governança).
 
 Diagnóstico crítico — **é aqui que a banca vai testar se vocês entendem o modelo**:
-- **Gênero:** AUC quase idêntico entre M (0,783) e F (0,778) — o modelo não perde
-  poder discriminativo por gênero. A menor taxa de aprovação para homens (60,6% vs.
-  74,3%) reflete a taxa de default real observada (10,2% vs. 7,0%), não é viés
+- **Gênero:** AUC quase idêntico entre M (0,7872) e F (0,7795) — o modelo não perde
+  poder discriminativo por gênero. A menor taxa de aprovação para homens (60,4% vs.
+  73,4%) reflete a taxa de default real observada (10,2% vs. 7,0%), não é viés
   arbitrário do modelo.
-- **Idade:** AUC cai nos extremos — menores de 25 anos (AUC 0,739) e 55–65 anos
-  (AUC 0,744) — o modelo é menos confiável justamente nos jovens, que têm a maior
-  taxa de default real (11,7%).
-- **Thin-file:** 14,3% da base não tem histórico de bureau. AUC menor (0,773 vs.
-  0,785) e menos aprovação (57,3% vs. 71,7%) — confirma que menos dado disponível =
+- **Idade:** AUC cai nos extremos — menores de 25 anos (AUC 0,7319) e 55–65 anos
+  (AUC 0,7465) — o modelo é menos confiável justamente nos jovens, que têm a maior
+  taxa de default real (11,8%).
+- **Thin-file:** 14,3% da base não tem histórico de bureau. AUC menor (0,7745 vs.
+  0,7868) — mas o IC sobrepõe o geral, então a diferença está dentro do ruído e menos aprovação (56,5% vs. 71,1%) — confirma que menos dado disponível =
   score menos confiável.
 - **Mitigação proposta:** revisão humana (human-in-the-loop) para os segmentos de
   AUC mais baixo, em vez de decisão 100% automática — conectado à arquitetura de
@@ -107,8 +112,8 @@ Diagnóstico crítico — **é aqui que a banca vai testar se vocês entendem o 
 
 ## 7. Fechamento (1 min)
 
-> "Com AUC de 0,785 e uma régua de decisão calibrada por custo, o modelo sustenta uma
-> aprovação de ~70% da carteira mantendo o risco sob controle — e sabemos exatamente
+> "Com AUC de 0,7868 e uma régua de decisão calibrada por custo, o modelo sustenta uma
+> aprovação de 68,7% da carteira mantendo o risco sob controle — e sabemos exatamente
 > onde ele é mais fraco (jovens e thin-file), então já propomos revisão humana pra
 > esses casos. O próximo passo é o deploy como serviço de predição, que é a etapa
 > individual de cada um de nós."
@@ -120,9 +125,9 @@ Diagnóstico crítico — **é aqui que a banca vai testar se vocês entendem o 
 | Pergunta | Resposta-chave |
 |---|---|
 | "Por que LightGBM e não outro modelo?" | Lida nativamente com nulos e categóricas de alta cardinalidade; testado contra baseline interpretável (regressão logística) para ter referência. |
-| "Como vocês sabem que não é overfitting?" | AUC validação (0,781) ≈ AUC teste (0,785) — se fosse overfitting, o teste cairia bem abaixo da validação. Early stopping (783 iterações) foi o mecanismo de controle. |
+| "Como vocês sabem que não é overfitting?" | AUC validação (0,7835) ≈ AUC teste (0,7871) — se fosse overfitting, o teste cairia bem abaixo da validação. Early stopping (507 iterações) foi o mecanismo de controle. |
 | "O modelo discrimina por gênero/idade?" | Não por gênero (AUC quase igual, diferença de aprovação reflete risco real medido). Por idade, sim há uma fraqueza real: AUC mais baixo em <25 e 55-65 — assumimos isso como limitação e propomos revisão humana nesses casos. |
-| "E os clientes sem histórico de crédito (thin-file)?" | 14,3% da base, AUC menor (0,773 vs 0,785) — mitigado com revisão humana, não decisão 100% automática. |
+| "E os clientes sem histórico de crédito (thin-file)?" | 14,3% da base, AUC 0,7745 contra 0,7871 do geral — mas o intervalo de confiança sobrepõe, então a diferença **não é estatisticamente estabelecida**. Mitigação de qualquer forma: revisão humana, não decisão 100% automática. |
 | "Qual o impacto financeiro real?" | Threshold calibrado por matriz de custo (FN custa 10x mais que FP) resulta em ~70% de aprovação — cada ponto de threshold pode ser traduzido em R$ evitado vs. volume aprovado (ver seção 3 do `evaluation.ipynb`). |
 | "Como isso vira produto?" | Etapa individual: API FastAPI + dashboard Streamlit, orquestração via `pipeline_orchestration.py`, infra em `docker-compose`, com monitoramento de drift e ações automatizadas descritas no `MLOps/Readme.md`. |
 
