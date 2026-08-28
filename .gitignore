@@ -1,8 +1,8 @@
-# Dados brutos (>3GB, fora do versionamento)
+# Dados brutos (>3GB) e tudo que o pipeline gera a partir deles.
+# O diretório inteiro fica fora do versionamento: os 9 CSVs do Kaggle somam
+# 2,6 GB e nada aqui é insumo de código — é entrada baixada ou saída gerada.
 data/
-Dados/raw_data.csv
-Dados/clean_data.csv
-Dados/abt.csv
+Dados/
 
 # Artefatos de modelo
 artifacts/
@@ -19,12 +19,10 @@ __pycache__/
 .DS_Store
 *.log
 
-# ABT em parquet (gerada por DataPipeline/to_parquet.py)
-Dados/abt.parquet
-
 # Rodada de demonstração (--sample), nunca a oficial
 artifacts/demo/
 artifacts_v1_baseline/
+artifacts_v3_baseline/
 
 # Airflow: logs de execução e o .env com o UID local
 MLOps/airflow/logs/
