@@ -29,6 +29,7 @@ maximizando o resultado financeiro.
 4. **Evaluation** — AUC, KS, Brier, threshold por custo, fairness com intervalo de
    confiança e **SHAP** — `Model/evaluation.ipynb` e `artifacts/`.
 5. **Deployment (MLOps)** — API FastAPI com 27 endpoints, dashboard Streamlit,
+   **telemetria em Prometheus/Grafana com alertas de indisponibilidade**,
    e **re-treino orquestrado no Airflow a cada 7 dias** (ver `MLOps/Readme.md`,
    `MLOps/airflow/README.md` e `MLOps/app/README.md`). Stack verificada em
    Docker; drift via `calcular_psi` no DAG e `GET /model/psi`.
@@ -123,6 +124,7 @@ Makefile          atalhos para testes, infraestrutura e relatórios (`make` list
 dags/             treino_credit_scoring.py · callables.py   (o DAG de re-treino)
 MLOps/            Readme.md · Dockerfile · docker-compose.yml · pipeline_orchestration.py
 MLOps/airflow/    Dockerfile · docker-compose.yml · README.md   (a instância do Airflow)
+MLOps/monitoring/ docker-compose.yml · prometheus/ · grafana/   (Prometheus + Grafana)
 MLOps/app/        api.py · db.py · schemas.py · explain.py · policy.py · routers/ · README.md · requests.http
 tests/            test_metrics_lib.py · test_derived.py · test_api.py · test_policy.py ·
                   test_split.py · test_security.py · test_dashboard.py · test_dags.py
@@ -145,8 +147,9 @@ artifacts/        model.joblib · metrics.json · curves.json · fairness.json �
 > ```bash
 > make            # lista os alvos
 > make test       # a suíte inteira
-> make up         # sobe serving + Airflow
-> make down       # derruba as duas (sem remover volume algum)
+> make up         # sobe serving + Airflow + monitoramento
+> make obs-alertas # o que está disparando agora
+> make down       # derruba as três (sem remover volume algum)
 > ```
 
 ### Agendado — Airflow, a cada 7 dias
@@ -222,6 +225,9 @@ curl "localhost:8000/clients/100052/explain?top=5"
 
 # como detectar que o modelo envelheceu (PSI — monitoramento de drift)
 curl "localhost:8000/model/psi?referencia=train&comparado=test"
+
+# telemetria de serviço: latência, erro, disponibilidade e decisões ao vivo
+curl -s localhost:8000/metrics | grep -E "^hc_api_pronta|^hc_predicoes_total"
 ```
 
 ---
