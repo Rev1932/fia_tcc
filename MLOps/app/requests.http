@@ -177,3 +177,16 @@ SK_ID_CURR,AMT_CREDIT,AMT_INCOME_TOTAL,AMT_ANNUITY,EXT_SOURCE_2,AGE_YEARS
 1,500000,150000,25000,0.55,35
 2,900000,90000,30000,0.12,23
 -----X--
+
+### ─────────────────────────────────────────────────────────────
+### Orquestração — Airflow em http://localhost:8080 (admin/admin)
+###
+### O re-treino roda a cada 7 dias pelo DAG treino_credit_scoring.
+### Estes endpoints são da API de credit scoring, não do Airflow;
+### para o DAG use a interface ou:
+###   docker compose -f MLOps/airflow/docker-compose.yml \
+###     exec airflow-scheduler airflow dags list-runs treino_credit_scoring
+### ─────────────────────────────────────────────────────────────
+
+### Drift medido na última rodada do DAG (task calcular_psi)
+GET {{host}}/model/psi?referencia=train&comparado=test

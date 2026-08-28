@@ -1,6 +1,6 @@
 # Roteiro do Pitch — Demoday (15 min)
 
-> **Números desta versão:** rodada canônica `20260823-215024-d73d85c`, gerada de
+> **Números desta versão:** rodada canônica `20260828-003844`, gerada de
 > `artifacts/`. Reimprima com `python Model/run_summary.py --markdown`.
 > Nenhum número aqui é digitado à mão.
 
