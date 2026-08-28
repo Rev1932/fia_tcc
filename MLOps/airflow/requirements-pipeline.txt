@@ -1,0 +1,31 @@
+# Dependências que as TASKS do pipeline precisam — deliberadamente um
+# subconjunto do requirements.txt do projeto.
+#
+# Por que não instalar o requirements.txt inteiro: ele traz fastapi==0.138.1,
+# e o apache-airflow-core 3.3.1 exige fastapi<0.137.0. Instalar tudo
+# sobrescreve a versão do Airflow e deixa a interface web numa combinação
+# que o projeto Airflow não testa.
+#
+# O Airflow ORQUESTRA o pipeline; ele não serve a API. As dependências de
+# serving (fastapi, uvicorn, streamlit) ficam de fora — elas vivem na imagem
+# home-credit-scoring:latest, que é quem sobe a API.
+#
+# Mantenha as versões idênticas às do requirements.txt da raiz: o modelo
+# treinado aqui é carregado lá.
+
+# Dados
+pandas==3.0.3
+numpy==2.4.6
+pyarrow==24.0.0
+PyYAML==6.0.3
+joblib==1.5.3
+duckdb==1.5.5
+
+# Modelagem
+scikit-learn==1.9.0
+lightgbm==4.6.0
+shap==0.52.0
+
+# Testes: os de estrutura do DAG (DagBag) só rodam onde o Airflow existe.
+#   docker compose exec airflow-scheduler bash -c "cd /opt/projeto && pytest tests/test_dags.py"
+pytest==9.1.1

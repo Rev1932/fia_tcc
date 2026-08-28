@@ -19,4 +19,10 @@ notebook==7.6.0
 fastapi==0.138.1
 uvicorn==0.49.0
 streamlit==1.58.0
+requests==2.34.2   # o dashboard consome a API por HTTP
 pydantic==2.13.4
+duckdb==1.5.5
+
+# Testes
+pytest==9.1.1
+httpx==0.28.1

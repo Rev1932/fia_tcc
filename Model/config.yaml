@@ -3,9 +3,18 @@
 
 paths:
   abt: Dados/abt.csv
+  abt_parquet: Dados/abt.parquet      # usado quando existir (leitura muito mais rápida)
   model_out: artifacts/model.joblib
   metrics_out: artifacts/metrics.json
   feature_meta_out: artifacts/feature_metadata.json
+  scores_out: artifacts/scores.parquet
+
+# Artefatos canônicos: tudo que documento, notebook e API leem sai daqui.
+# Nenhum número de slide pode vir de outro lugar.
+artifacts:
+  roc_max_points: 300      # downsample da ROC (roc_curve devolve ~30k pontos)
+  sweep_points: 99         # mesmo grid de business_threshold — não desalinhar
+  bootstrap_n: 500         # reamostragens do IC de AUC por segmento
 
 target: TARGET
 id_col: SK_ID_CURR
@@ -13,6 +22,9 @@ id_col: SK_ID_CURR
 split:
   test_size: 0.2
   valid_size: 0.2
+  # Fatia exclusiva de calibração (Fix 7), recortada do treino.
+  # 0 desliga a calibração e reproduz o split original 60/20/20.
+  calib_size: 0.1
   random_state: 42
   stratify: true
 
@@ -43,6 +55,18 @@ champion:
     random_state: 42
     n_jobs: -1
   early_stopping_rounds: 100
+
+  # EXPERIMENTO — reponderação dos segmentos de baixa confiança medida.
+  # Hipótese: o AUC cai nos extremos de idade porque são poucos (<25 são ~4%
+  # da base) e o gradiente é dominado pelo miolo da distribuição.
+  # Regra de aceite (TODO.md §4): só fica se melhorar o segmento-alvo SEM
+  # piorar o global. Resultado do experimento registrado em TODO.md §2.
+  sample_weight:
+    enabled: false
+    segments:
+      age_band:
+        "<25": 3.0
+        "55-65": 2.0
 
 # Matriz de custo para o threshold de negócio (em unidades monetárias relativas)
 business:

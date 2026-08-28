@@ -2,6 +2,10 @@
 
 ### Credit Scoring — Home Credit Default Risk · MBA Big Data e Analytics (FIA/LABDATA)
 
+> **Números desta versão:** rodada canônica `20260828-003844`, gerada de
+> `artifacts/`. Reimprima com `python Model/run_summary.py --markdown`.
+> Nenhum número aqui é digitado à mão.
+
 > Base textual consolidada para o PPT (5 slides) e a defesa na banca. Consolida as
 > seções 1–3 de `PLAN.md`, com os números reais já produzidos em
 > `DataPipeline/exp_analysis.ipynb` e `Model/evaluation.ipynb`.
@@ -50,7 +54,7 @@ explicabilidade defensáveis perante uma banca.
 **Objetivos específicos:**
 
 1. Construir pipeline reprodutível: `raw → clean → ABT`, agregando as 9 tabelas
-   relacionais em ~470 features por cliente.
+   relacionais em 1.018 features por cliente.
 2. Treinar um baseline interpretável (Regressão Logística) **e** um modelo campeão
    (LightGBM) com controle de overfitting.
 3. Avaliar com métricas técnicas e **traduzir em métrica de negócio** (matriz de custo).
@@ -69,10 +73,10 @@ explicabilidade defensáveis perante uma banca.
 
 | Modelo                            | AUC       | KS        |
 | --------------------------------- | --------- | --------- |
-| Baseline — Regressão Logística | 0,771     | 0,406     |
-| **Campeão — LightGBM**          | **0,785** | **0,438** |
+| Baseline — Regressão Logística | 0,7776     | 0,4228     |
+| **Campeão — LightGBM (servido)** | **0,7868** | **0,4342** |
 
-- AUC treino = 0,872 · AUC validação = 0,781 · AUC teste = 0,785 → validação e teste
+- AUC treino = 0,8753 · AUC validação = 0,7835 · AUC teste = 0,7871 → validação e teste
   praticamente empatados, indicando generalização estável (early stopping na iteração
   654 evitou overfitting descontrolado, apesar do gap natural treino→validação).
 - Threshold de negócio calibrado em **0,50**, com **taxa de aprovação de 72,1%**, usando
@@ -124,28 +128,72 @@ detalhadas em `MLOps/Readme.md`.
 
 ---
 
-## 4. Diagnóstico crítico — pontos de atenção para a banca
+## 4. Diagnóstico crítico — o que foi medido, corrigido e o que restou
 
-> Calculado em `Model/evaluation.ipynb` (seções 6 e 7), com o modelo campeão sobre o
-> conjunto de teste.
+> Calculado em `Model/train.py` (que grava `artifacts/fairness.json`) sobre o conjunto
+> de teste, com **intervalo de confiança bootstrap** para cada segmento.
 
-- **Overfitting:** controlado — AUC treino 0,883 vs. validação 0,781 vs. teste 0,785;
-  validação e teste praticamente empatados (early stopping na iteração 783).
-- **Viés por gênero:** AUC muito próximo entre M (0,7834) e F (0,7783) — o modelo
-  discrimina risco igualmente bem nos dois grupos. A taxa de aprovação é menor para
-  homens (60,6% vs. 74,3%), mas acompanha a taxa de default real observada (10,2% vs.
-  7,0%) — a diferença reflete risco real, não viés injustificado.
-- **Viés por idade:** AUC cai nos extremos — clientes com menos de 25 anos (AUC 0,739)
-  e a faixa 55-65 (AUC 0,744) têm poder de ordenação mais fraco que a faixa 35-55
-  (AUC ~0,79). O modelo é menos confiável exatamente para o segmento mais jovem, que
-  também tem a maior taxa de default real (11,7%).
-- **Desempenho no grupo thin-file:** 14,3% da base de teste não tem nenhum registro em
-  `bureau` (`BUREAU_COUNT` nulo). Esse grupo tem AUC menor (0,773 vs. 0,785 do restante)
-  e taxa de aprovação mais baixa (57,3% vs. 71,7%), apesar de default real mais alto
-  (10,1% vs. 7,7%) — confirma que menos sinal disponível deixa o score menos confiável.
-- **Cenários de falha:** concentrar decisões 100% automáticas nos segmentos com AUC mais
-  baixo (jovens <25, thin-file) é o principal risco operacional — recomenda-se rota de
-  revisão humana para esses casos em vez de aprovação/negação totalmente automática.
+### 4.1 Overfitting — controlado
+
+AUC treino **0,8753** → validação **0,7835** → teste **0,7871**.
+O gap treino→validação é esperado com mais de mil variáveis; o que importa é que
+**validação e teste empatam**. Early stopping parou na iteração **507** de 2.000.
+
+### 4.2 Fraqueza real vs. ruído amostral
+
+Um AUC menor num grupo pequeno pode ser apenas tamanho de amostra. Por isso cada
+segmento vem com IC bootstrap, e só conta como fraqueza real quando o **topo do seu IC
+fica abaixo do piso do IC geral** ([0,7806–0,7935]).
+
+| Segmento | n | AUC | IC 95% | Fraqueza real? | Aprovação | Inadimplência real |
+|---|---|---|---|---|---|---|
+| Homens | 20,940 | 0,7872 | [0,7778–0,7963] | não | 60,4% | 10,17% |
+| Mulheres | 40,561 | 0,7795 | [0,7709–0,7886] | não | 73,4% | 6,99% |
+| < 25 anos | 2,355 | **0,7319** | [0,7012–0,7597] | **sim** | 41,5% | 11,80% |
+| 55–65 anos | 12,166 | **0,7465** | [0,7281–0,7672] | **sim** | 79,9% | 5,61% |
+| Thin-file | 8,776 | 0,7745 | [0,7577–0,7899] | não | 56,5% | 10,14% |
+
+**Gênero:** o poder de ordenação é praticamente idêntico entre os grupos. A aprovação
+menor para homens acompanha a inadimplência real observada — o modelo **discrimina
+risco, não pessoas**.
+
+**Idade:** aqui há fraqueza genuína, nos dois extremos. E ela **não foi resolvida** pelas
+correções desta rodada (ver 4.4).
+
+**Thin-file:** ao contrário do que versões anteriores deste trabalho afirmavam, a
+diferença **não é estatisticamente distinguível** do modelo geral. O IC sobrepõe.
+
+### 4.3 Calibração
+
+Com `is_unbalance=true` o score ordenava bem mas **não era P(inadimplência) real** — o
+corte ótimo caía em 0,47, um número indefensável como probabilidade. Uma regressão
+isotônica ajustada em fatia exclusiva corrigiu isso:
+
+| | Antes | Depois |
+|---|---|---|
+| Brier | 0,1668 | **0,0658** |
+| Ponto de corte | 0,47 | **0,09** |
+| AUC | 0,7871 | 0,7868 |
+
+O AUC não muda porque a isotônica é monotônica: ela corrige a probabilidade, não a
+ordenação. Verificação independente: a média do score em toda a base é 0,081, contra
+inadimplência real de 8,07%.
+
+### 4.4 O que não foi resolvido
+
+As correções (agregação das categóricas da ABT, scores externos combinados, calibração)
+melhoraram o modelo geral, mas **a faixa abaixo de 25 anos praticamente não se moveu**.
+É o grupo com menos histórico por definição, e histórico é o insumo que falta.
+
+A resposta para essa limitação é de processo, não de modelagem: **régua de três faixas**,
+com a faixa cinza dobrada nos segmentos de baixa confiança medida, encaminhando esses
+casos a análise humana com o relatório SHAP. Consultável em
+`GET /model/decision-policy`.
+
+### 4.5 Cenários de falha
+
+Decidir 100% automaticamente nos segmentos de AUC comprovadamente menor é o principal
+risco operacional. É exatamente o que a régua de três faixas evita.
 
 ---
 

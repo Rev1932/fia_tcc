@@ -1,0 +1,192 @@
+### Coleção de chamadas da API de Credit Scoring
+# Executável direto no editor (VS Code REST Client / JetBrains HTTP Client).
+# Existe para você não precisar digitar nada durante a apresentação.
+
+@host = http://localhost:8000
+
+### Saúde — confere run_id, threshold e nº de clientes
+GET {{host}}/health
+
+### Dimensões aceitas em ?by=
+GET {{host}}/meta/dimensions
+
+### Colunas com "EXT_" no nome
+GET {{host}}/meta/columns?prefix=EXT_
+
+# ==========================================================================
+# CLIENTES
+# ==========================================================================
+
+### Jovens sem histórico de bureau — o segmento mais difícil da base
+GET {{host}}/clients?age_min=20&age_max=25&thin_file=true&page_size=5
+
+### Maiores riscos da carteira, só as colunas que interessam
+GET {{host}}/clients?fields=SK_ID_CURR,AGE_YEARS,AMT_CREDIT,proba_champion&sort=proba_champion&order=desc&page_size=10
+
+### Negados com escolaridade fundamental incompleta
+GET {{host}}/clients?decision=NEGAR&education=Lower secondary&page_size=5
+
+### Ficha completa de um cliente
+GET {{host}}/clients/100002
+
+### Score + recálculo ao vivo (prova que artefato e modelo concordam)
+GET {{host}}/clients/100002/score?recompute=true
+
+# ==========================================================================
+# ESTATÍSTICAS — a EDA ao vivo
+# ==========================================================================
+
+### KPIs da carteira
+GET {{host}}/stats/overview
+
+### Inadimplência por escolaridade (1,83% doutorado -> 10,93% fundamental)
+GET {{host}}/stats/default-rate?by=education
+
+### Inadimplência por faixa etária
+GET {{host}}/stats/default-rate?by=age_band
+
+### Thin-file: quantos são e qual o risco
+GET {{host}}/stats/default-rate?by=thin_file
+
+### O MESMO corte, restrito a thin-file com menos de 25 anos
+GET {{host}}/stats/default-rate?by=education&thin_file=true&age_max=25&min_count=5
+
+### Distribuição de idade com taxa de inadimplência por faixa
+GET {{host}}/stats/distribution?feature=AGE_YEARS&bins=8&by_target=true
+
+### As colunas com mais nulos
+GET {{host}}/stats/missing?top=10
+
+### Cruzamento thin-file x faixa etária
+GET {{host}}/stats/crosstab?rows=thin_file&cols=age_band
+
+# ==========================================================================
+# MODELO
+# ==========================================================================
+
+### Métricas oficiais — a fonte única de verdade
+GET {{host}}/model/metrics
+
+### Curva ROC
+GET {{host}}/model/roc
+
+### KS + tabela de decis (a linguagem de uma mesa de crédito)
+GET {{host}}/model/ks
+
+### Calibração: o score é uma probabilidade de verdade?
+GET {{host}}/model/calibration
+
+### Importância — veja `by_source` para saber se a ABT das 9 tabelas valeu
+GET {{host}}/model/feature-importance?top=15
+
+### Régua de custo congelada (falso negativo custa 10x o falso positivo)
+GET {{host}}/model/threshold-analysis?cost_fn=1&cost_fp=0.1
+
+### "E se aprovar um mau pagador custasse 20x?" — sem re-treinar
+GET {{host}}/model/threshold-analysis?cost_fn=20&cost_fp=1
+
+### "E se os dois erros custassem igual?"
+GET {{host}}/model/threshold-analysis?cost_fn=1&cost_fp=1
+
+### Matriz de confusão no corte vigente
+GET {{host}}/model/confusion-matrix
+
+### Viés por gênero — AUC praticamente igual: discrimina risco, não pessoas
+GET {{host}}/model/fairness?by=gender
+
+### Por idade — veja `overlaps_overall`: onde é fraqueza real, não ruído
+GET {{host}}/model/fairness?by=age_band
+
+### Thin-file
+GET {{host}}/model/fairness?by=thin_file
+
+### O que foi consertado: antes e depois por segmento
+GET {{host}}/model/improvements
+
+### Régua de três faixas e quantos casos vão a revisão humana
+GET {{host}}/model/decision-policy
+
+# ==========================================================================
+# PREDIÇÃO, SIMULAÇÃO E EXPLICABILIDADE
+# ==========================================================================
+
+### Por que este cliente recebeu este score
+GET {{host}}/clients/100002/explain?top=8
+
+### Pontuar um cliente novo (payload parcial é aceito)
+POST {{host}}/predict
+Content-Type: application/json
+
+{
+  "records": [
+    {
+      "NAME_CONTRACT_TYPE": "Cash loans",
+      "CODE_GENDER": "F",
+      "AMT_INCOME_TOTAL": 150000,
+      "AMT_CREDIT": 500000,
+      "AMT_ANNUITY": 25000,
+      "DAYS_BIRTH": -12775,
+      "EXT_SOURCE_2": 0.55,
+      "EXT_SOURCE_3": 0.42
+    }
+  ],
+  "explain": true,
+  "explain_top": 5
+}
+
+### What-if: e se ele pedisse o dobro de crédito?
+POST {{host}}/simulate
+Content-Type: application/json
+
+{"sk_id_curr": 100002, "changes": {"AMT_CREDIT": 900000}}
+
+### What-if: e se a renda dobrasse?
+POST {{host}}/simulate
+Content-Type: application/json
+
+{"sk_id_curr": 100002, "changes": {"AMT_INCOME_TOTAL": 400000}}
+
+### Varredura: onde a decisão vira ao longo do score externo
+POST {{host}}/simulate
+Content-Type: application/json
+
+{
+  "sk_id_curr": 100002,
+  "sweep": {"feature": "EXT_SOURCE_2", "start": 0.0, "stop": 1.0, "steps": 11}
+}
+
+### Recarregar modelo e artefatos após um re-treino ao vivo
+POST {{host}}/admin/reload
+
+### Drift: estabilidade do score entre fatias
+GET {{host}}/model/psi?referencia=train&comparado=test
+
+### Drift por variável
+GET {{host}}/model/psi?features=AGE_YEARS,AMT_INCOME_TOTAL,EXT_SOURCE_2,BUREAU_COUNT
+
+### Lote via CSV — pontua a fila do dia e devolve CSV
+# (crie um fila.csv com colunas iguais às features do modelo)
+POST {{host}}/predict/csv
+Content-Type: multipart/form-data; boundary=---X
+
+-----X
+Content-Disposition: form-data; name="arquivo"; filename="fila.csv"
+Content-Type: text/csv
+
+SK_ID_CURR,AMT_CREDIT,AMT_INCOME_TOTAL,AMT_ANNUITY,EXT_SOURCE_2,AGE_YEARS
+1,500000,150000,25000,0.55,35
+2,900000,90000,30000,0.12,23
+-----X--
+
+### ─────────────────────────────────────────────────────────────
+### Orquestração — Airflow em http://localhost:8080 (admin/admin)
+###
+### O re-treino roda a cada 7 dias pelo DAG treino_credit_scoring.
+### Estes endpoints são da API de credit scoring, não do Airflow;
+### para o DAG use a interface ou:
+###   docker compose -f MLOps/airflow/docker-compose.yml \
+###     exec airflow-scheduler airflow dags list-runs treino_credit_scoring
+### ─────────────────────────────────────────────────────────────
+
+### Drift medido na última rodada do DAG (task calcular_psi)
+GET {{host}}/model/psi?referencia=train&comparado=test

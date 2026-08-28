@@ -13,6 +13,8 @@ paths:
   # Saídas
   clean_data: Dados/clean_data.csv
   abt: Dados/abt.csv
+  abt_parquet: Dados/abt.parquet
+  profile_out: artifacts/abt_profile.json
   raw_sample: Dados/raw_data.csv
 
 target: TARGET
@@ -33,6 +35,32 @@ sanitization:
 abt:
   # Estatísticas usadas nas agregações por cliente
   agg_funcs: [mean, sum, max, min, count]
+  # Grava também em Parquet (a API lê daí)
+  write_parquet: true
+
+  # Fix 1 — CATEGÓRICAS das tabelas relacionais.
+  # A versão anterior da ABT só agregava colunas numéricas e descartava estas
+  # em silêncio. bureau_balance.STATUS é o histórico mês a mês de atraso e
+  # previous_application.NAME_CONTRACT_STATUS é o histórico de recusa: os dois
+  # sinais mais fortes da base ficavam de fora das 473 colunas.
+  # Deixe a lista vazia ({}) para reproduzir a ABT v1.
+  categorical_agg:
+    max_categories: 15          # cauda longa vira "OUTROS"
+    bureau: [CREDIT_ACTIVE, CREDIT_TYPE]
+    bureau_balance: [STATUS]
+    previous_application: [NAME_CONTRACT_STATUS, CODE_REJECT_REASON,
+                           NAME_YIELD_GROUP, NAME_CLIENT_TYPE, NAME_PORTFOLIO]
+    pos_cash: [NAME_CONTRACT_STATUS]
+    credit_card: [NAME_CONTRACT_STATUS]
+
+  # Fix 5 — janela recente em paralelo às agregações vitalícias.
+  # Comportamento recente prediz melhor que média de vida inteira, e para quem
+  # tem histórico curto (jovens) a média vitalícia é ruidosa.
+  recent_window:
+    pos_cash:      {column: MONTHS_BALANCE, months: 12}
+    credit_card:   {column: MONTHS_BALANCE, months: 12}
+    installments:  {column: DAYS_INSTALMENT, months: 12}
+    previous_application: {column: DAYS_DECISION, months: 24}
   # Ratios derivados (numerador / denominador)
   ratios:
     CREDIT_INCOME_RATIO: [AMT_CREDIT, AMT_INCOME_TOTAL]
