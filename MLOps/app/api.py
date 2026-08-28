@@ -20,7 +20,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
 
-from MLOps.app import artifacts, db, settings
+from MLOps.app import artifacts, db, metrics, settings
 from MLOps.app.routers import clients, model, scoring, stats
 from MLOps.app.schemas import ColumnsResponse, DimensionInfo, HealthResponse
 
@@ -227,6 +227,10 @@ def create_app() -> FastAPI:
     app.include_router(stats.router)
     app.include_router(model.router)
     app.include_router(scoring.router)
+
+    # Telemetria por último: o instrumentador precisa das rotas já registradas
+    # para nomear o label `handler` pelo template, e não pela URL concreta.
+    metrics.instrumentar(app)
     return app
 
 
