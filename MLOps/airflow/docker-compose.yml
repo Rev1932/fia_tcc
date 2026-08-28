@@ -1,0 +1,172 @@
+# Instância de Airflow que orquestra o treino do modelo.
+#
+# Arquivo SEPARADO do MLOps/docker-compose.yml de propósito: são ciclos de vida
+# diferentes. A API fica no ar servindo predições; o Airflow acorda a cada 7
+# dias para re-treinar. Subir um não exige subir o outro.
+#
+# Uso:
+#   cd MLOps/airflow
+#   echo "AIRFLOW_UID=$(id -u)" > .env      # obrigatório: ver nota abaixo
+#   docker compose up -d --build
+#   http://localhost:8080   (admin / admin)
+#
+# LocalExecutor, e não CeleryExecutor: 3 serviços em vez de 8, sem Redis nem
+# workers separados. O executor roda as tasks como subprocessos do próprio
+# scheduler — suficiente para uma máquina, e muito mais simples de demonstrar.
+
+x-airflow-comum: &airflow-comum
+  build:
+    context: ../..
+    dockerfile: MLOps/airflow/Dockerfile
+  image: hc-airflow:3.3.1
+  environment: &airflow-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres/airflow
+    AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+    # Fuso local: sem isto os horários da interface saem em UTC e a leitura
+    # do agendamento de 7 dias fica confusa.
+    AIRFLOW__CORE__DEFAULT_TIMEZONE: America/Sao_Paulo
+    AIRFLOW__API__EXPOSE_CONFIG: "true"
+    # Chave de criptografia das Variables e Connections. Sem fixá-la, cada
+    # container gera a sua e o que um grava o outro não consegue ler
+    # ("Can't decrypt _val for key=..."). Valor de desenvolvimento local —
+    # em produção viria de um cofre de segredos, nunca do compose.
+    AIRFLOW__CORE__FERNET_KEY: "${AIRFLOW_FERNET_KEY:-Zp8kR2vN4xQ7wL1yT6aB9cD3eF5gH0jK8mP4sU7nV2Y=}"
+    # No Airflow 3 as tasks falam com a Execution API do apiserver em vez de
+    # acessar o banco direto. Sem este endereço o worker tenta localhost e
+    # morre com "Connection refused" ANTES de rodar qualquer linha do código —
+    # o log da task fica com uma linha só, o que despista.
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+    # Assina os tokens que o worker apresenta à Execution API. Precisa ser a
+    # MESMA nos dois serviços: cada um gerando a sua produz "Invalid auth
+    # token" na primeira task. Valor de desenvolvimento local.
+    AIRFLOW__API_AUTH__JWT_SECRET: "${AIRFLOW_JWT_SECRET:-hc-tcc-jwt-dev-2026}"
+    # As tasks importam Model.metrics_lib e Model.derived.
+    PYTHONPATH: /opt/projeto
+    # Raiz do projeto DENTRO do container. As tasks usam cwd=/opt/projeto
+    # porque os scripts resolvem caminhos relativos à raiz do repositório.
+    HC_PROJETO: /opt/projeto
+  volumes:
+    - ../../dags:/opt/airflow/dags:ro
+    - ./logs:/opt/airflow/logs
+    # O projeto entra por volume, não por COPY: são 5,1 GB de dados que o
+    # .dockerignore exclui da imagem de propósito.
+    - ../../data:/opt/projeto/data:ro              # brutos do Kaggle (3,2 GB)
+    - ../../DataPipeline:/opt/projeto/DataPipeline:ro
+    - ../../Model:/opt/projeto/Model:ro
+    - ../../MLOps:/opt/projeto/MLOps:ro
+    # Os testes de estrutura do DAG (DagBag) só rodam onde o Airflow existe:
+    #   docker compose exec airflow-scheduler \
+    #     bash -c "cd /opt/projeto && pytest tests/test_dags.py"
+    - ../../tests:/opt/projeto/tests:ro
+    # Também em /opt/projeto/dags: os testes importam `dags.callables`, e o
+    # /opt/airflow/dags é a pasta que o Airflow varre, não um pacote Python.
+    - ../../dags:/opt/projeto/dags:ro
+    - ../../pyproject.toml:/opt/projeto/pyproject.toml:ro
+    - ../../Dados:/opt/projeto/Dados               # ESCRITA: clean_data, abt
+    - ../../artifacts:/opt/projeto/artifacts       # ESCRITA: rodada canônica
+  # AIRFLOW_UID precisa ser o UID do host. Sem isso o container escreve em
+  # Dados/ e artifacts/ como root, e o .venv do host perde acesso à própria
+  # rodada canônica — a falha mais provável desta stack.
+  # GID 0 é OBRIGATÓRIO: a imagem do Airflow recusa qualquer outro
+  # ("ERROR! You should run the image with GID=0"). O UID é o do host, e é ele
+  # que define o DONO dos arquivos gravados em Dados/ e artifacts/ — o grupo
+  # sai como root, o que não impede leitura nem escrita pelo dono.
+  user: "${AIRFLOW_UID:-50000}:0"
+  depends_on:
+    airflow-postgres:
+      condition: service_healthy
+
+services:
+  airflow-postgres:
+    image: postgres:16-alpine
+    container_name: hc-airflow-db
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - airflow-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Roda uma vez: migra o banco e cria o usuário. Os outros serviços esperam
+  # ele terminar com sucesso.
+  airflow-init:
+    <<: *airflow-comum
+    container_name: hc-airflow-init
+    # Sem `entrypoint:` sobrescrito: o entrypoint oficial da imagem é quem
+    # configura PATH e ambiente Python. Trocá-lo por /bin/bash faz o `airflow`
+    # sumir do PATH (ModuleNotFoundError: No module named 'airflow').
+    command:
+      - bash
+      - -c
+      - |
+        set -e
+        airflow db migrate
+        airflow users create --username admin --password admin \
+          --firstname Admin --lastname Local --role Admin --email admin@local || true
+        airflow variables set hc_sample "" || true
+        airflow variables set hc_auc_max_drop "0.01" || true
+        echo "[init] banco migrado, usuario admin e Variables prontos."
+    restart: "no"
+
+  airflow-apiserver:
+    <<: *airflow-comum
+    container_name: hc-airflow-web
+    command: api-server
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/api/v2/monitor/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # No Airflow 3 o parsing dos DAGs saiu do scheduler para um serviço próprio.
+  # Sem ele os arquivos em dags/ ficam montados e simplesmente nunca aparecem
+  # na interface — sem erro nenhum, o que torna o problema difícil de achar.
+  airflow-dag-processor:
+    <<: *airflow-comum
+    container_name: hc-airflow-dag-processor
+    command: dag-processor
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  airflow-scheduler:
+    <<: *airflow-comum
+    container_name: hc-airflow-scheduler
+    command: scheduler
+    healthcheck:
+      # `airflow jobs check` e não curl numa porta: o scheduler do Airflow 3
+      # não expõe endpoint HTTP de saúde (a 8793 serve logs, sem /health).
+      test: ["CMD-SHELL", 'airflow jobs check --job-type SchedulerJob --hostname "$${HOSTNAME}"']
+      interval: 30s
+      timeout: 20s
+      retries: 5
+      start_period: 60s
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  airflow-db:

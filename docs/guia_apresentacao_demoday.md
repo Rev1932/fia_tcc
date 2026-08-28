@@ -196,6 +196,18 @@ devolve a probabilidade de default em tempo real.
 **Streamlit** — dashboard de demonstração para simular pedidos.
 **Orquestração (Airflow)** — agendador que roda o pipeline (dados brutos → limpeza →
 ABT → treino) de ponta a ponta, automaticamente.
+- *1 frase:* "É o que transforma o re-treino de um comando que alguém precisa
+  lembrar de rodar num processo agendado, com histórico e log de cada etapa."
+- *Completo:* No projeto, o DAG `treino_credit_scoring` roda **a cada 7 dias** e
+  quebra o pipeline em **9 tasks** — cada etapa com log próprio na interface, em
+  `localhost:8080`. Três delas não existiam no pipeline manual: `checar_fontes`
+  (falha em segundos se um CSV sumiu, em vez de descobrir 11 min depois),
+  `validar_abt` (granularidade e vazamento, antes de gastar 15 min treinando) e
+  **`validar_metricas`** — o gate: se o AUC cair além do limiar frente à última
+  rodada aceita, a execução **falha** e o modelo anterior continua servindo.
+  Mais `calcular_psi`, que mede o drift do score a cada rodada.
+- *Para demonstrar em 1 minuto:* Variable `hc_sample=30000` e disparo manual —
+  o mesmo DAG, sobre uma amostra, gravando em `artifacts/demo/`.
 **Docker / docker-compose** — empacota tudo em containers reprodutíveis (API na porta
 8000, dashboard na 8501).
 **Data drift / PSI** — mudança na distribuição dos dados de entrada vs. o treino;
@@ -387,7 +399,7 @@ importante."*
 
 ### Os 12 números que você NÃO pode errar
 
-> Gerados de `artifacts/` pela rodada `20260823-215024-d73d85c`.
+> Gerados de `artifacts/` pela rodada `20260828-003844`.
 > Para reimprimir depois de um re-treino: `python Model/run_summary.py --markdown`.
 
 | # | Número | O que é | Truque de memória |
@@ -506,6 +518,14 @@ Decore a **primeira frase** de cada resposta — ela ganha tempo e mostra segura
 > que a um bom pagador, escolhidos ao acaso — 0,5 é aleatório, o nosso é 0,7871."
 > KS: "É a separação máxima entre a distribuição de score dos bons e dos maus — 43,5
 > pontos, acima do patamar de 40 que o mercado considera bom."
+
+**"Como o modelo é re-treinado? Alguém roda na mão?"**
+> "Não. Tem um DAG no Airflow que roda a cada 7 dias, com uma task por etapa do
+> pipeline — dá pra ver o log de cada uma na interface. E tem um gate: se o
+> re-treino piorar o AUC além do limite, a execução falha e o modelo antigo
+> continua servindo. A regra de aceite que a gente usou no desenvolvimento virou
+> verificação automática." *(Se pedirem para ver: `localhost:8080`, e com a
+> Variable `hc_sample` o DAG inteiro roda em um minuto.)*
 
 **"Se eu pedir pra mudar um hiperparâmetro agora, vocês conseguem?"**
 > "Sim — tudo está centralizado no Model/config.yaml: hiperparâmetros do LightGBM na

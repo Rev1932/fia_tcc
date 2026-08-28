@@ -28,9 +28,10 @@ maximizando o resultado financeiro.
    + **calibração isotônica** — `Model/train.py`.
 4. **Evaluation** — AUC, KS, Brier, threshold por custo, fairness com intervalo de
    confiança e **SHAP** — `Model/evaluation.ipynb` e `artifacts/`.
-5. **Deployment (MLOps)** — API FastAPI com 26 endpoints, dashboard Streamlit,
-   orquestração e docker-compose (ver `MLOps/Readme.md` e `MLOps/app/README.md`).
-   Stack verificada em Docker; monitoramento de drift via `GET /model/psi`.
+5. **Deployment (MLOps)** — API FastAPI com 27 endpoints, dashboard Streamlit,
+   e **re-treino orquestrado no Airflow a cada 7 dias** (ver `MLOps/Readme.md`,
+   `MLOps/airflow/README.md` e `MLOps/app/README.md`). Stack verificada em
+   Docker; drift via `calcular_psi` no DAG e `GET /model/psi`.
 
 ## 📈 Resultados (conjunto de teste)
 
@@ -93,9 +94,12 @@ revisão humana (`GET /model/decision-policy`).
 Dados/            raw_data.csv · clean_data.csv · abt.csv · abt.parquet   (gerados; fora do git)
 DataPipeline/     data_sanitization.py · abt_transform.py · to_parquet.py · exp_analysis.ipynb · config.yaml
 Model/            train.py · predict.py · metrics_lib.py · derived.py · run_summary.py · evaluation.ipynb · config.yaml
+dags/             treino_credit_scoring.py · callables.py   (o DAG de re-treino)
 MLOps/            Readme.md · Dockerfile · docker-compose.yml · pipeline_orchestration.py
+MLOps/airflow/    Dockerfile · docker-compose.yml · README.md   (a instância do Airflow)
 MLOps/app/        api.py · db.py · schemas.py · explain.py · policy.py · routers/ · README.md · requests.http
-tests/            test_metrics_lib.py · test_derived.py · test_api.py · test_security.py
+tests/            test_metrics_lib.py · test_derived.py · test_api.py ·
+                  test_security.py · test_dashboard.py · test_dags.py
 artifacts/        model.joblib · metrics.json · curves.json · fairness.json ·
                   feature_importance.json · improvement_log.json · scores.parquet   (gerados)
 ```
@@ -105,6 +109,21 @@ artifacts/        model.joblib · metrics.json · curves.json · fairness.json �
 > <https://www.kaggle.com/competitions/home-credit-default-risk>.
 
 ## 🚀 Como reproduzir
+
+### Agendado — Airflow, a cada 7 dias
+
+```bash
+cd MLOps/airflow
+echo "AIRFLOW_UID=$(id -u)" > .env
+docker compose up -d --build      # http://localhost:8080  (admin/admin)
+```
+
+O DAG `treino_credit_scoring` quebra o pipeline em 9 tasks — cada etapa com log
+próprio na interface — e inclui um **gate de qualidade**: se o AUC cair além do
+limiar frente à última rodada aceita, a execução falha e os artefatos anteriores
+permanecem. Detalhes em [`MLOps/airflow/README.md`](MLOps/airflow/README.md).
+
+### Manual — sem subir infraestrutura
 
 ```bash
 # 1) Ambiente (Python 3.14)

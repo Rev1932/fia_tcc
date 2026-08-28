@@ -21,9 +21,10 @@ ou por outra pessoa — sem precisar reconstruir o contexto.
 | ABT | ✅ 1.020 colunas — categóricas das tabelas relacionais recuperadas |
 | Modelo | ✅ LightGBM calibrado (servido), AUC 0,7868 · KS 0,4342 · Brier 0,0658 |
 | Rodada canônica | ✅ Congelada em `artifacts/`, é fonte única de verdade |
-| API | ✅ 27 endpoints, documentação própria, 99 testes passando |
+| API | ✅ 27 endpoints, documentação própria, 113 testes passando |
 | Dashboard | ✅ Executado e coberto por `tests/test_dashboard.py` |
 | Docker | ✅ Build e stack verificados, healthcheck falha corretamente |
+| Orquestração | ✅ Airflow 3.3.1 em Docker, DAG de 9 tasks a cada 7 dias |
 | Documentação | ✅ README, TCC, pitch e guia reconciliados com os artefatos |
 | Monitoramento de drift | ✅ `GET /model/psi` implementado e testado |
 | Notebook de avaliação | ✅ Reescrito lendo de `artifacts/`, re-executado nesta máquina |
@@ -194,6 +195,38 @@ e rode `python Model/train.py --tag v4-pesos-idade`.
 
 ---
 
+## 2b. Orquestração — ✅ implementada em 24/08/2026
+
+O treino era disparado à mão, rodando quatro arquivos em sequência. Não havia
+agendamento, histórico nem como acompanhar uma rodada — e `OKR.md:46,124`
+registra o Airflow como **requisito do enunciado**, enquanto
+`MLOps/Readme.md:9` o desenhava no diagrama de arquitetura como se existisse.
+
+Agora existe de fato: `MLOps/airflow/` sobe uma instância do Airflow 3.3.1 em
+Docker (5 serviços, LocalExecutor) e `dags/treino_credit_scoring.py` define
+**9 tasks**, agendadas a cada **7 dias**, com log por etapa em `localhost:8080`.
+
+Três tasks não existiam no pipeline manual, e existem porque falhar cedo é mais
+barato: `checar_fontes` (segundos, em vez de descobrir 11 min adiante),
+`validar_abt` (granularidade e vazamento, antes de gastar 15 min treinando) e
+**`validar_metricas`** — o gate: se o AUC cair além do limiar frente à última
+rodada aceita, a execução falha e o modelo anterior continua servindo. Mais
+`calcular_psi`, que cumpre o "PSI em job no Airflow" que o Readme prometia.
+
+Modo demonstração: Variable `hc_sample=30000` faz o mesmo DAG rodar em ~1 min,
+gravando em `artifacts/demo/`.
+
+### O que ficou de fora
+- **Notificação ativa** quando o gate barra uma rodada — hoje fica no log.
+  E-mail ou Slack seria o passo seguinte.
+- **Retenção de logs**: `MLOps/airflow/logs/` cresce sem limpeza automática.
+- **Segredos no compose**: `FERNET_KEY` e `JWT_SECRET` estão fixos com valores
+  de desenvolvimento. Em produção viriam de um cofre.
+- **Uma instância só**: LocalExecutor não distribui. Suficiente para uma
+  máquina, insuficiente para vários pipelines concorrentes.
+
+---
+
 ## 3. Dívidas técnicas conhecidas
 
 ### 3.1 Baseline não é pontuado na fatia de treino — ⚠️ **aceita, com erro explicativo**
@@ -310,6 +343,12 @@ usando a API ao vivo. Meta: menos de um minuto por pergunta.
    → `GET /model/improvements` → campo `rejeitadas`, com o motivo registrado
 7. *"Como isso entra na operação diária?"*
    → `POST /predict/csv` com a fila do dia
+8. *"Como o modelo é re-treinado? Alguém roda na mão?"*
+   → `localhost:8080` — o DAG roda a cada 7 dias, e com a Variable
+   `hc_sample=30000` a demonstração inteira leva ~1 min
+9. *"E se o re-treino piorar o modelo?"*
+   → a task `validar_metricas` falha a execução; os artefatos da rodada
+   anterior continuam intactos e servindo
 
 A pergunta 2 é a que não tinha resposta antes deste ciclo. As perguntas 5 a 7
 não existiam como resposta executável até hoje.
@@ -365,6 +404,15 @@ de configuração, nunca de entrada de usuário (ver `db._lit`).
 Basta acrescentar qualquer outro parâmetro e ele volta a exigir um campo
 chamado `filters`. Por isso os filtros entram por `Depends()` — e por isso os
 filtros multivalorados são texto separado por vírgula, não `list[str]`.
+
+**Airflow 3 mudou muita coisa de lugar, e nenhuma dá erro óbvio.** Imports
+saíram do core para `airflow.providers.standard`; o `dag-processor` virou
+serviço separado (sem ele os DAGs simplesmente não aparecem); as tasks falam
+com a Execution API e precisam de `EXECUTION_API_SERVER_URL` + `JWT_SECRET`
+compartilhado, senão morrem antes de rodar a primeira linha, deixando o log
+com uma linha só; e `{{ ds }}` não existe em DAG com `schedule=timedelta`
+disparado manualmente. A lista completa está em `MLOps/airflow/README.md`,
+seção "Armadilhas do Airflow 3".
 
 **A imagem Docker não vê mudança de código sem rebuild.** Óbvio, mas pega:
 os artefatos entram por volume (mudam sozinhos), o **código é assado na
