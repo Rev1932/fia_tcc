@@ -38,6 +38,11 @@ x-airflow-comum: &airflow-comum
     # morre com "Connection refused" ANTES de rodar qualquer linha do código —
     # o log da task fica com uma linha só, o que despista.
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+    # O SimpleAuthManager (padrão do Airflow 3) grava as senhas num arquivo e
+    # só gera senha para usuário que ainda não está nele. Fora daqui o caminho
+    # cai em $AIRFLOW_HOME, que não é volume: a senha mudaria a cada recriação.
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/auth/passwords.json
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: "admin:admin"
     # Assina os tokens que o worker apresenta à Execution API. Precisa ser a
     # MESMA nos dois serviços: cada um gerando a sua produz "Invalid auth
     # token" na primeira task. Valor de desenvolvimento local.
@@ -50,6 +55,9 @@ x-airflow-comum: &airflow-comum
   volumes:
     - ../../dags:/opt/airflow/dags:ro
     - ./logs:/opt/airflow/logs
+    # Arquivo de senhas do SimpleAuthManager. Precisa ser gravável: o Airflow
+    # abre em "a+" e trava com flock. `make airflow-env` semeia admin/admin.
+    - ./auth:/opt/airflow/auth
     # O projeto entra por volume, não por COPY: são 5,1 GB de dados que o
     # .dockerignore exclui da imagem de propósito.
     - ../../data:/opt/projeto/data:ro              # brutos do Kaggle (3,2 GB)
@@ -109,11 +117,10 @@ services:
       - |
         set -e
         airflow db migrate
-        airflow users create --username admin --password admin \
-          --firstname Admin --lastname Local --role Admin --email admin@local || true
         airflow variables set hc_sample "" || true
         airflow variables set hc_auc_max_drop "0.01" || true
-        echo "[init] banco migrado, usuario admin e Variables prontos."
+        echo "[init] banco migrado e Variables prontas."
+        echo "[init] login: admin / admin (SimpleAuthManager, ./auth/passwords.json)"
     restart: "no"
 
   airflow-apiserver:
