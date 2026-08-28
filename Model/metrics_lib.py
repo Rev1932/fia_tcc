@@ -277,6 +277,235 @@ def auc_bootstrap_ci(y_true, y_score, n_boot: int = 1000, alpha: float = 0.05,
 
 
 # --------------------------------------------------------------------------
+# Comparação entre segmentos — o AUC de um grupo contra os DEMAIS
+#
+# Por que não comparar o AUC de um segmento com o AUC geral: o segmento é
+# SUBCONJUNTO do geral (as estimativas são aninhadas) e o AUC agregado conta
+# pares de grupos diferentes, que não existem em nenhum AUC intra-grupo.
+# São duas quantidades que não medem a mesma coisa.
+# --------------------------------------------------------------------------
+
+
+def _auc_par(y_true, y_score, mask_ev, mask_nev) -> float | None:
+    """AUC de um bloco de pares: eventos de um grupo x não-eventos de outro."""
+    s_ev, s_nev = y_score[mask_ev], y_score[mask_nev]
+    if s_ev.size == 0 or s_nev.size == 0:
+        return None
+    y = np.concatenate([np.ones(s_ev.size, dtype=int), np.zeros(s_nev.size, dtype=int)])
+    return float(roc_auc_score(y, np.concatenate([s_ev, s_nev])))
+
+
+def auc_within_between(y_true, y_score, groups) -> dict:
+    """Decompõe o AUC agregado em pares DENTRO e ENTRE grupos.
+
+    Identidade exata: o AUC é a proporção de pares (evento, não-evento) bem
+    ordenados, então particionar os pares por (grupo do evento, grupo do
+    não-evento) reconstrói o total. `w_within` diz que fração da evidência do
+    AUC geral vem de comparações dentro do mesmo grupo — é o número que mostra
+    sobre quantos pares um segmento pequeno está realmente sendo medido.
+    """
+    y_true = np.asarray(y_true).astype(int)
+    y_score = np.asarray(y_score, dtype=float)
+    groups = np.asarray(groups, dtype=object)
+
+    nomes = sorted({g for g in groups[~pd_isna(groups)]})
+    ev = {g: (groups == g) & (y_true == 1) for g in nomes}
+    nev = {g: (groups == g) & (y_true == 0) for g in nomes}
+
+    matriz, pesos = {}, {}
+    for i in nomes:
+        for j in nomes:
+            p = int(ev[i].sum()) * int(nev[j].sum())
+            if not p:
+                continue
+            a = _auc_par(y_true, y_score, ev[i], nev[j])
+            if a is None:
+                continue
+            matriz[f"{i}|{j}"] = a
+            pesos[f"{i}|{j}"] = p
+
+    total = sum(pesos.values())
+    if not total:
+        return {"auc_overall": None, "note": "sem pares utilizáveis"}
+
+    p_in = sum(v for k, v in pesos.items() if k.split("|")[0] == k.split("|")[1])
+    s_in = sum(matriz[k] * pesos[k] for k in pesos if k.split("|")[0] == k.split("|")[1])
+    p_out, s_out = total - p_in, sum(matriz[k] * pesos[k] for k in pesos) - s_in
+
+    return {
+        "auc_overall": float(sum(matriz[k] * pesos[k] for k in pesos) / total),
+        "auc_within": float(s_in / p_in) if p_in else None,
+        "auc_between": float(s_out / p_out) if p_out else None,
+        "w_within": float(p_in / total),
+        "w_between": float(p_out / total),
+        "pares_total": int(total),
+        "pares_por_grupo": {g: int(ev[g].sum()) * int(nev[g].sum()) for g in nomes},
+        "matriz": matriz,
+    }
+
+
+def pd_isna(arr):
+    """isna elemento a elemento num array de objetos (evita depender do pandas)."""
+    return np.array([v is None or (isinstance(v, float) and np.isnan(v)) for v in arr])
+
+
+def auc_diff_bootstrap(y_true, y_score, groups, target, n_boot: int = 1000,
+                       alpha: float = 0.05, random_state: int = 42) -> dict:
+    """Bootstrap estratificado da DIFERENÇA entre o AUC de um grupo e o dos demais.
+
+    A referência é o AUC medido DENTRO de cada um dos outros grupos, ponderado
+    pelo número de pares de cada um — a mesma quantidade que `auc_within_between`
+    chama de `auc_within`. É comparável ao AUC do grupo porque as duas contam
+    só pares intra-grupo.
+
+    Reamostra cada grupo separadamente, preservando o n de cada um, e recalcula
+    os dois lados na MESMA réplica: o IC sai da distribuição da diferença, e não
+    da sobreposição de dois ICs independentes (que não é teste de hipótese).
+    """
+    y_true = np.asarray(y_true).astype(int)
+    y_score = np.asarray(y_score, dtype=float)
+    groups = np.asarray(groups, dtype=object)
+
+    nomes = sorted({g for g in groups[~pd_isna(groups)]})
+    if target not in nomes:
+        return {"target": target, "note": "grupo ausente"}
+
+    idx = {g: np.flatnonzero(groups == g) for g in nomes}
+    usaveis = [g for g in nomes
+               if y_true[idx[g]].min() != y_true[idx[g]].max()]
+    outros = [g for g in usaveis if g != target]
+    if target not in usaveis or not outros:
+        return {"target": target, "note": "sem ambas as classes no grupo ou na referência"}
+
+    def auc_de(g, ii):
+        y = y_true[ii]
+        return None if y.min() == y.max() else float(roc_auc_score(y, y_score[ii]))
+
+    # Pesos congelados nos valores originais: o estimando não pode se mover
+    # entre réplicas, senão o IC mistura variação do alvo com a da referência.
+    peso = {g: int((y_true[idx[g]] == 1).sum()) * int((y_true[idx[g]] == 0).sum())
+            for g in outros}
+    soma_peso = sum(peso.values())
+
+    def referencia(aucs: dict) -> float | None:
+        num = sum(peso[g] * aucs[g] for g in outros if aucs.get(g) is not None)
+        den = sum(peso[g] for g in outros if aucs.get(g) is not None)
+        return float(num / den) if den else None
+
+    ponto = {g: auc_de(g, idx[g]) for g in usaveis}
+    auc_alvo, auc_ref = ponto[target], referencia(ponto)
+    if auc_alvo is None or auc_ref is None:
+        return {"target": target, "note": "AUC indefinido"}
+
+    rng = np.random.default_rng(random_state)
+    difs = []
+    for _ in range(n_boot):
+        rep = {}
+        for g in usaveis:
+            ii = idx[g][rng.integers(0, idx[g].size, idx[g].size)]
+            rep[g] = auc_de(g, ii)
+        r = referencia(rep)
+        if rep.get(target) is None or r is None:
+            continue
+        difs.append(rep[target] - r)
+
+    if not difs:
+        return {"target": target, "auc_target": auc_alvo, "auc_reference": auc_ref,
+                "diff": auc_alvo - auc_ref, "note": "bootstrap degenerado"}
+
+    difs = np.asarray(difs)
+    lo, hi = np.quantile(difs, [alpha / 2, 1 - alpha / 2])
+    # p-valor bicaudal do bootstrap, com a correção de continuidade usual.
+    p_uni = (1 + min((difs >= 0).sum(), (difs <= 0).sum())) / (difs.size + 1)
+    return {
+        "target": target,
+        "auc_target": auc_alvo,
+        "auc_reference": auc_ref,
+        "reference_kind": "auc_intra_grupo_dos_demais_ponderado_por_pares",
+        "reference_groups": outros,
+        "reference_weights": {g: peso[g] / soma_peso for g in outros},
+        "diff": float(auc_alvo - auc_ref),
+        "diff_ci_low": float(lo),
+        "diff_ci_high": float(hi),
+        "p_value": float(min(1.0, 2 * p_uni)),
+        "alpha": alpha,
+        "n_boot": int(difs.size),
+        "significativo": bool(hi < 0 or lo > 0),
+        "pior_que_referencia": bool(hi < 0),
+    }
+
+
+
+def auc_diff_all_groups(y_true, y_score, groups, n_boot: int = 1000,
+                        alpha: float = 0.05, random_state: int = 42) -> dict:
+    """`auc_diff_bootstrap` para todos os grupos de um eixo, numa passada só.
+
+    As réplicas são COMPARTILHADAS entre os grupos: cada réplica reamostra o
+    eixo inteiro uma vez e todos os grupos são medidos nela. Além de custar
+    n_boot em vez de n_boot x n_grupos, isso mantém as comparações coerentes
+    entre si — dois grupos do mesmo eixo são julgados na mesma reamostragem.
+    """
+    y_true = np.asarray(y_true).astype(int)
+    y_score = np.asarray(y_score, dtype=float)
+    groups = np.asarray(groups, dtype=object)
+
+    nomes = sorted({g for g in groups[~pd_isna(groups)]})
+    idx = {g: np.flatnonzero(groups == g) for g in nomes}
+    usaveis = [g for g in nomes
+               if idx[g].size and y_true[idx[g]].min() != y_true[idx[g]].max()]
+    if len(usaveis) < 2:
+        return {}
+
+    peso = {g: int((y_true[idx[g]] == 1).sum()) * int((y_true[idx[g]] == 0).sum())
+            for g in usaveis}
+
+    def auc_de(ii):
+        y = y_true[ii]
+        return None if y.min() == y.max() else float(roc_auc_score(y, y_score[ii]))
+
+    def referencia(aucs: dict, alvo: str):
+        num = sum(peso[g] * aucs[g] for g in usaveis
+                  if g != alvo and aucs.get(g) is not None)
+        den = sum(peso[g] for g in usaveis if g != alvo and aucs.get(g) is not None)
+        return float(num / den) if den else None
+
+    ponto = {g: auc_de(idx[g]) for g in usaveis}
+
+    rng = np.random.default_rng(random_state)
+    difs: dict[str, list[float]] = {g: [] for g in usaveis}
+    for _ in range(n_boot):
+        rep = {g: auc_de(idx[g][rng.integers(0, idx[g].size, idx[g].size)])
+               for g in usaveis}
+        for g in usaveis:
+            r = referencia(rep, g)
+            if rep[g] is not None and r is not None:
+                difs[g].append(rep[g] - r)
+
+    saida = {}
+    for g in usaveis:
+        ref = referencia(ponto, g)
+        d = np.asarray(difs[g])
+        if ref is None or d.size == 0:
+            saida[g] = {"target": g, "auc_target": ponto[g], "note": "sem referência"}
+            continue
+        lo, hi = np.quantile(d, [alpha / 2, 1 - alpha / 2])
+        p_uni = (1 + min((d >= 0).sum(), (d <= 0).sum())) / (d.size + 1)
+        soma = sum(peso[o] for o in usaveis if o != g) or 1
+        saida[g] = {
+            "target": g, "auc_target": ponto[g], "auc_reference": ref,
+            "reference_kind": "auc_intra_grupo_dos_demais_ponderado_por_pares",
+            "reference_groups": [o for o in usaveis if o != g],
+            "reference_weights": {o: peso[o] / soma for o in usaveis if o != g},
+            "diff": float(ponto[g] - ref),
+            "diff_ci_low": float(lo), "diff_ci_high": float(hi),
+            "p_value": float(min(1.0, 2 * p_uni)),
+            "alpha": alpha, "n_boot": int(d.size),
+            "significativo": bool(hi < 0 or lo > 0),
+            "pior_que_referencia": bool(hi < 0),
+        }
+    return saida
+
+# --------------------------------------------------------------------------
 # Estabilidade populacional (PSI) — monitoramento de drift
 # --------------------------------------------------------------------------
 
