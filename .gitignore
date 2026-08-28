@@ -25,3 +25,8 @@ Dados/abt.parquet
 # Rodada de demonstração (--sample), nunca a oficial
 artifacts/demo/
 artifacts_v1_baseline/
+
+# Airflow: logs de execução e o .env com o UID local
+MLOps/airflow/logs/
+MLOps/airflow/.env
+artifacts_pre_airflow/
