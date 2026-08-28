@@ -8,6 +8,7 @@ data/
 artifacts/
 artifacts_v1_baseline/
 docs/
+MLOps/monitoring/
 tests/
 .git/
 *.pdf

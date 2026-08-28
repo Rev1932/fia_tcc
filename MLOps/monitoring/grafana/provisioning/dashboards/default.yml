@@ -1,0 +1,13 @@
+# Aponta a pasta dos painéis. Este arquivo NÃO contém dashboard nenhum — os
+# JSON vivem em options.path, montados do repositório.
+apiVersion: 1
+
+providers:
+  - name: credit-scoring
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false
