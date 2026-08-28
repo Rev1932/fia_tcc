@@ -15,6 +15,7 @@ SAMPLE ?= 30000
 
 MLOPS   := docker compose -f MLOps/docker-compose.yml
 AIRFLOW := cd MLOps/airflow && docker compose
+OBS     := docker compose -f MLOps/monitoring/docker-compose.yml
 
 ##@ Ajuda
 
@@ -29,6 +30,8 @@ urls: ## Mostra os endereços e credenciais dos serviços
 	@echo "  API .......... http://localhost:8000/docs"
 	@echo "  Dashboard .... http://localhost:8501"
 	@echo "  Airflow ...... http://localhost:8080   (admin/admin)"
+	@echo "  Grafana ...... http://localhost:3000   (sem login)"
+	@echo "  Prometheus ... http://localhost:9090"
 
 ##@ Ambiente
 
@@ -230,21 +233,68 @@ airflow-states: ## Estado task a task: make airflow-states RUN=<run_id>
 	@test -n '$(RUN)' || { echo "uso: make airflow-states RUN=<run_id>   (veja: make airflow-runs)"; exit 1; }
 	@$(AIRFLOW) exec airflow-scheduler airflow tasks states-for-dag-run $(DAG) '$(RUN)'
 
+##@ Observabilidade — Prometheus + Grafana
+
+obs-build: ## Baixa as imagens de Prometheus e Grafana
+	@$(OBS) pull
+
+obs-up: mlops-up ## Sobe o monitoramento (exige a stack de serving, pela rede)
+	@$(OBS) up -d
+	@echo "  Grafana ...... http://localhost:3000   (sem login)"
+	@echo "  Prometheus ... http://localhost:9090"
+
+obs-stop: ## Para Prometheus e Grafana
+	@$(OBS) stop
+
+obs-start: ## Religa Prometheus e Grafana
+	@$(OBS) start
+
+obs-restart: ## Reinicia os dois
+	@$(OBS) restart
+
+obs-ps: ## Estado dos containers de observabilidade
+	@$(OBS) ps
+
+obs-logs: ## Segue o log dos dois
+	@$(OBS) logs -f
+
+obs-logs-prometheus: ## Segue o log do Prometheus
+	@$(OBS) logs -f prometheus
+
+obs-alvos: ## Estado do scrape da API (o Prometheus enxerga a API?)
+	@curl -s localhost:9090/api/v1/targets \
+	  | $(PYTHON) -c "import sys,json; [print('  %-14s %-22s %s' % (t['labels']['job'], t['scrapeUrl'], t['health'])) for t in json.load(sys.stdin)['data']['activeTargets']]" \
+	  || echo "  Prometheus não respondeu — rode: make obs-up"
+
+obs-alertas: ## Alertas disparando agora
+	@curl -s localhost:9090/api/v1/alerts \
+	  | $(PYTHON) -c "import sys,json; a=json.load(sys.stdin)['data']['alerts']; print('  nenhum alerta ativo') if not a else [print('  %-9s %-22s %s' % (x['state'].upper(), x['labels']['alertname'], x['annotations'].get('resumo',''))) for x in a]" \
+	  || echo "  Prometheus não respondeu — rode: make obs-up"
+
+obs-regras: ## Lista as regras de alerta carregadas
+	@curl -s localhost:9090/api/v1/rules \
+	  | $(PYTHON) -c "import sys,json; [print('  [%s] %-20s %s' % (g['name'], r['name'], r['state'])) for g in json.load(sys.stdin)['data']['groups'] for r in g['rules']]" \
+	  || echo "  Prometheus não respondeu — rode: make obs-up"
+
+obs-down: ## Derruba o monitoramento (não remove volume algum)
+	@$(OBS) down
+
 ##@ As duas stacks de uma vez
 
-up: mlops-up airflow-up urls ## Sobe serving + Airflow
+up: mlops-up airflow-up obs-up urls ## Sobe serving + Airflow + monitoramento
 
-down: mlops-down airflow-down ## Derruba as duas (nenhum volume é removido)
+down: obs-down mlops-down airflow-down ## Derruba as três (nenhum volume é removido)
 
-stop: mlops-stop airflow-stop ## Para as duas
+stop: obs-stop mlops-stop airflow-stop ## Para as três
 
-start: mlops-start airflow-start ## Religa as duas
+start: mlops-start airflow-start obs-start ## Religa as três
 
-restart: mlops-restart airflow-restart ## Reinicia as duas
+restart: mlops-restart airflow-restart obs-restart ## Reinicia as três
 
-ps: ## Estado das duas stacks
+ps: ## Estado das três stacks
 	@echo "--- serving ---"; $(MLOPS) ps
 	@echo "--- airflow ---"; $(AIRFLOW) ps
+	@echo "--- observabilidade ---"; $(OBS) ps
 
 .PHONY: help urls check-venv venv deps \
         test test-metrics test-policy test-split test-api test-dags test-airflow \
@@ -258,4 +308,6 @@ ps: ## Estado das duas stacks
         airflow-ps airflow-logs airflow-logs-scheduler airflow-logs-web airflow-shell \
         airflow-down airflow-sample-on airflow-sample-off airflow-trigger-demo \
         airflow-trigger airflow-runs airflow-states \
+        obs-build obs-up obs-stop obs-start obs-restart obs-ps obs-logs \
+        obs-logs-prometheus obs-alvos obs-alertas obs-regras obs-down \
         up down stop start restart ps
