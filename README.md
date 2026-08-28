@@ -119,6 +119,7 @@ DataPipeline/     data_sanitization.py · abt_transform.py · to_parquet.py · e
 Model/            train.py · predict.py · metrics_lib.py · derived.py · run_summary.py · evaluation.ipynb · config.yaml
                   diagnostico_idade.py · experimento_teto_idade.py   (diagnóstico da faixa etária)
 scripts/          restaurar_improvement_log.py · regenerar_fairness.py
+Makefile          atalhos para testes, infraestrutura e relatórios (`make` lista tudo)
 dags/             treino_credit_scoring.py · callables.py   (o DAG de re-treino)
 MLOps/            Readme.md · Dockerfile · docker-compose.yml · pipeline_orchestration.py
 MLOps/airflow/    Dockerfile · docker-compose.yml · README.md   (a instância do Airflow)
@@ -135,6 +136,18 @@ artifacts/        model.joblib · metrics.json · curves.json · fairness.json �
 > <https://www.kaggle.com/competitions/home-credit-default-risk>.
 
 ## 🚀 Como reproduzir
+
+> **Atalho:** há um `Makefile` na raiz para o que se repete — testes, subir e derrubar as
+> stacks (inteiras ou serviço a serviço), diagnóstico e relatórios. `make` sozinho lista
+> tudo. Ele **não** cobre o pipeline de dados, que é responsabilidade do DAG. Os comandos
+> abaixo continuam válidos e são o que o `make` executa por baixo.
+>
+> ```bash
+> make            # lista os alvos
+> make test       # a suíte inteira
+> make up         # sobe serving + Airflow
+> make down       # derruba as duas (sem remover volume algum)
+> ```
 
 ### Agendado — Airflow, a cada 7 dias
 
