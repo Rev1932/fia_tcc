@@ -13,7 +13,8 @@ import io
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
-from MLOps.app import artifacts, db, explain as ex, policy, settings
+from MLOps.app import artifacts, db, metrics, policy, settings
+from MLOps.app import explain as ex
 from Model.derived import apply_changes, recompute
 from MLOps.app.schemas import (
     ExplainResponse,
@@ -78,6 +79,7 @@ def predict_endpoint(request: Request, req: PredictRequest):
             "coverage": len(informadas) / len(esperadas) if esperadas else 0.0,
             "unknown_features": sorted(k for k in req.records[i] if k not in esperadas),
         }
+        metrics.registrar_predicao(request, item["decision"], p, "/predict")
         if req.explain:
             r = ex.explain_record(rec, bundle, str(settings.MODEL_PATH), req.explain_top)
             item["contributions"] = (r["top_risk_drivers"] + r["top_protective_factors"])
@@ -112,6 +114,7 @@ def explain_client(request: Request, sk_id_curr: int,
     feats = {k: v for k, v in row.items() if k in set(bundle["feature_names"])}
     r = ex.explain_record(feats, bundle, str(settings.MODEL_PATH), top)
     decisao = policy.decide(r["probability_default"], thr, _band(request, row))
+    metrics.registrar_predicao(request, decisao, r["probability_default"], "/clients/score")
 
     return {"sk_id_curr": sk_id_curr, "threshold": thr, "decision": decisao,
             "narrative": ex.narrate(r, thr, decisao, sk_id_curr), **r}
@@ -148,8 +151,10 @@ def simulate(request: Request, req: SimulateRequest, con=Depends(db.get_db)):
 
     def pontuar(rec: dict) -> dict:
         p = float(predict([rec], str(settings.MODEL_PATH))[0]["probability_default"])
+        decisao = policy.decide(p, thr, band)
+        metrics.registrar_predicao(request, decisao, p, "/simulate")
         return {"probability_default": p,
-                "decision": policy.decide(p, thr, band),
+                "decision": decisao,
                 "score_band": ex.score_band(p)}
 
     base = pontuar(base_rec)
@@ -277,9 +282,11 @@ async def predict_csv(request: Request,
     escritor.writeheader()
     for original, res in zip(linhas, resultados):
         p = float(res["probability_default"])
+        decisao = policy.decide(p, thr, _band(request, original))
+        metrics.registrar_predicao(request, decisao, p, "/predict/csv")
         escritor.writerow({**original,
                            "probability_default": f"{p:.6f}",
-                           "decision": policy.decide(p, thr, _band(request, original)),
+                           "decision": decisao,
                            "score_band": ex.score_band(p)})
     saida.seek(0)
 
