@@ -174,9 +174,11 @@ def confusion_matrix(request: Request,
     response_model=FairnessResponse,
     summary="Desempenho por segmento sensível, com intervalo de confiança",
     description=(
-        "Cada grupo vem com IC bootstrap do AUC. Isso é o que separa fraqueza real "
-        "de ruído amostral: `overlaps_overall=false` significa que a diferença NÃO é "
-        "explicável por tamanho de amostra."
+        "Cada grupo vem com IC bootstrap do AUC e com `vs_referencia`, o IC da "
+        "DIFERENÇA entre o AUC do grupo e o dos demais grupos do mesmo eixo — é esse "
+        "o critério de fraqueza (`fraqueza_confirmada`). O campo `overlaps_overall` "
+        "compara com o AUC geral e está DEPRECADO: um grupo é subconjunto do geral, e "
+        "o AUC geral inclui pares entre grupos que nenhum AUC intra-grupo tem."
     ),
 )
 def fairness(request: Request,
@@ -200,7 +202,9 @@ def fairness(request: Request,
 
     return {"dimension": by,
             "threshold": threshold if threshold is not None else f.get("threshold"),
-            "overall": geral, "groups": saida}
+            "overall": geral, "groups": saida,
+            "criterio": f.get("criterio"),
+            "decomposicao": (f.get("decomposicao") or {}).get(by)}
 
 
 @router.get(

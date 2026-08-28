@@ -33,7 +33,13 @@ def ler(nome: str) -> dict:
 
 
 def fraqueza_real(grupo: dict, geral: dict) -> bool:
-    """IC do grupo inteiramente abaixo do IC geral -> não é ruído amostral."""
+    """Pior que os DEMAIS grupos do mesmo eixo, pelo IC bootstrap da diferença.
+
+    Artefato antigo não tem o campo; nesse caso vale o critério anterior
+    (IC do grupo abaixo do IC geral), que era inválido mas é o que existe.
+    """
+    if "fraqueza_confirmada" in grupo:
+        return bool(grupo["fraqueza_confirmada"])
     return (grupo.get("ci_high") is not None
             and geral.get("ci_low") is not None
             and grupo["ci_high"] < geral["ci_low"])
@@ -53,6 +59,7 @@ def montar() -> dict:
         dims[dim] = [{
             "grupo": g["group"], "n": g["n"], "auc": g.get("auc"),
             "ci_low": g.get("ci_low"), "ci_high": g.get("ci_high"),
+            "vs_referencia": g.get("vs_referencia"),
             "aprovacao": g.get("approval_rate"), "default": g.get("default_rate"),
             "fraqueza_real": fraqueza_real(g, geral),
         } for g in grupos]
@@ -110,6 +117,8 @@ def montar() -> dict:
             "calibracao": cal_pts,
             "calibracao_crua": cal_raw,
         },
+        "decomposicao": fair.get("decomposicao"),
+        "criterio": fair.get("criterio"),
         "evolucao": evolucao,
         "rejeitadas": rejeitadas,
         "nulos": nulos,
