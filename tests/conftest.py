@@ -134,7 +134,9 @@ def ambiente(tmp_path_factory):
     # logística com OneHot em 154 mil linhas custa tempo e nenhum endpoint usa.
     base_proba = np.where(split == "train", np.nan, score * 0.95)
     pd.DataFrame({"SK_ID_CURR": df.SK_ID_CURR, "split": split, "y_true": y,
-                  "proba_champion": score, "proba_baseline": base_proba}
+                  "proba_champion": score,
+                  "proba_champion_raw": np.clip(score * 1.05, 0, 1),
+                  "proba_baseline": base_proba}
                  ).to_parquet(art / "scores.parquet", index=False)
 
     auc = float(roc_auc_score(y, score))
@@ -153,8 +155,9 @@ def ambiente(tmp_path_factory):
                    "threshold": thr, "approval_rate": float((score < thr).mean())},
     }))
 
-    from Model.metrics_lib import (auc_bootstrap_ci, calibration_points, decile_table,
-                                   ks_curve, roc_points, threshold_sweep)
+    from Model.metrics_lib import (auc_bootstrap_ci, auc_diff_bootstrap,
+                                   auc_within_between, calibration_points,
+                                   decile_table, ks_curve, roc_points, threshold_sweep)
     (art / "curves.json").write_text(json.dumps({
         "run_id": "teste-0001",
         "champion": {
@@ -193,6 +196,37 @@ def ambiente(tmp_path_factory):
                         "default_rate": float(y[m].mean()),
                         "avg_score": float(score[m].mean()), "brier": 0.07})
         return out
+    def _faixa(v):
+        for hi, rot in ((25, "<25"), (35, "25-35"), (45, "35-45"),
+                        (55, "45-55"), (65, "55-65")):
+            if v < hi:
+                return rot
+        return "65+"
+
+    def faixas_com_diferenca():
+        """Dimensão no formato NOVO, para exercitar o critério da diferença.
+
+        `gender` fica no formato antigo de propósito: o mesmo fixture cobre os
+        dois caminhos de `low_confidence_groups`.
+        """
+        rot = np.array([_faixa(v) for v in df.AGE_YEARS], dtype=object)
+        out = []
+        for g in sorted(set(rot)):
+            m = rot == g
+            if m.sum() < 30:
+                continue
+            dif = auc_diff_bootstrap(y, score, rot, g, n_boot=40)
+            out.append({"group": g, **auc_bootstrap_ci(y[m], score[m], n_boot=40),
+                        "pct_da_base": float(m.mean()),
+                        "approval_rate": float((score[m] < thr).mean()),
+                        "default_rate": float(y[m].mean()),
+                        "avg_score": float(score[m].mean()), "brier": 0.07,
+                        "vs_referencia": dif,
+                        "fraqueza_confirmada": bool(dif.get("pior_que_referencia")),
+                        "calibracao": {"previsto": float(score[m].mean()),
+                                       "observado": float(y[m].mean())}})
+        return out
+
     (art / "fairness.json").write_text(json.dumps({
         "run_id": "teste-0001", "threshold": thr,
         "overall": {**geral, "approval_rate": float((score < thr).mean()),
@@ -201,7 +235,12 @@ def ambiente(tmp_path_factory):
             "gender": grupos(df.CODE_GENDER),
             "thin_file": grupos(df.BUREAU_COUNT.isna().map(
                 {True: "thin-file (sem bureau)", False: "com histórico de bureau"})),
+            "age_band": faixas_com_diferenca(),
         },
+        "criterio": {"nome": "bootstrap_da_diferenca_intra_eixo",
+                     "descricao": "IC da diferença contra os demais grupos do eixo"},
+        "decomposicao": {"age_band": auc_within_between(
+            y, score, [_faixa(v) for v in df.AGE_YEARS])},
     }))
 
     (art / "improvement_log.json").write_text(json.dumps({"runs": [

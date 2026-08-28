@@ -139,24 +139,49 @@ def main() -> None:
     add(f"AUC geral: **{num(geral.get('auc'))}** "
         f"[{num(geral.get('ci_low'))} – {num(geral.get('ci_high'))}]")
     add("")
-    add("O intervalo de confiança é bootstrap. Um grupo só conta como fraqueza "
-        "real quando seu IC **não sobrepõe** o geral — caso contrário a "
-        "diferença é explicável por tamanho de amostra.")
+    add((fair.get("criterio") or {}).get("descricao")
+        or ("O intervalo de confiança é bootstrap. Um grupo só conta como fraqueza "
+            "real quando seu IC **não sobrepõe** o geral (critério anterior)."))
     add("")
     for dim, grupos in (fair.get("dimensions") or {}).items():
+        dec = (fair.get("decomposicao") or {}).get(dim) or {}
         add(f"### {dim}")
         add("")
-        add("| Grupo | n | AUC | IC 95% | Fraqueza real? | Aprovação | Inadimplência real |")
-        add("|---|---|---|---|---|---|---|")
+        novo_criterio = any("fraqueza_confirmada" in g for g in grupos)
+        if novo_criterio:
+            add("| Grupo | n | AUC | IC 95% | Δ vs. demais | IC da diferença | p | "
+                "Fraqueza? | Aprovação | Inadimplência real |")
+            add("|---|---|---|---|---|---|---|---|---|---|")
+        else:
+            add("| Grupo | n | AUC | IC 95% | Fraqueza real? | Aprovação | "
+                "Inadimplência real |")
+            add("|---|---|---|---|---|---|---|")
         for g in grupos:
-            lo, hi = geral.get("ci_low"), geral.get("ci_high")
-            real = (g.get("ci_high") is not None and lo is not None
-                    and g["ci_high"] < lo)
-            add(f"| {g['group']} | {g['n']:,} | {num(g.get('auc'))} | "
-                f"[{num(g.get('ci_low'))} – {num(g.get('ci_high'))}] | "
-                f"{'**sim**' if real else 'não'} | {pct(g.get('approval_rate'))} | "
-                f"{pct(g.get('default_rate'))} |".replace(",", "."))
+            if novo_criterio:
+                v = g.get("vs_referencia") or {}
+                add(f"| {g['group']} | {g['n']:,} | {num(g.get('auc'))} | "
+                    f"[{num(g.get('ci_low'))} – {num(g.get('ci_high'))}] | "
+                    f"{num(v.get('diff'))} | "
+                    f"[{num(v.get('diff_ci_low'))} – {num(v.get('diff_ci_high'))}] | "
+                    f"{num(v.get('p_value'), 3)} | "
+                    f"{'**sim**' if g.get('fraqueza_confirmada') else 'não'} | "
+                    f"{pct(g.get('approval_rate'))} | "
+                    f"{pct(g.get('default_rate'))} |".replace(",", "."))
+            else:
+                lo = geral.get("ci_low")
+                real = (g.get("ci_high") is not None and lo is not None
+                        and g["ci_high"] < lo)
+                add(f"| {g['group']} | {g['n']:,} | {num(g.get('auc'))} | "
+                    f"[{num(g.get('ci_low'))} – {num(g.get('ci_high'))}] | "
+                    f"{'**sim**' if real else 'não'} | {pct(g.get('approval_rate'))} | "
+                    f"{pct(g.get('default_rate'))} |".replace(",", "."))
         add("")
+        if dec.get("auc_within") is not None:
+            add(f"Decomposição do AUC agregado: {pct(dec.get('w_within'))} dos pares são "
+                f"DENTRO do mesmo grupo (AUC {num(dec.get('auc_within'))}) e "
+                f"{pct(dec.get('w_between'))} são ENTRE grupos "
+                f"(AUC {num(dec.get('auc_between'))}).")
+            add("")
 
     log_path = ART / "improvement_log.json"
     if log_path.exists():
@@ -165,13 +190,16 @@ def main() -> None:
         if len(runs) > 1:
             add("## Evolução entre as rodadas")
             add("")
-            add("| Rodada | Features | AUC | KS | Brier | Corte | Aprovação |")
-            add("|---|---|---|---|---|---|---|")
+            add("| Rodada | Status | Features | AUC | KS | Brier | Corte | Aprovação |")
+            add("|---|---|---|---|---|---|---|---|")
             for r in runs:
-                add(f"| {r.get('tag')} | {r.get('n_features'):,} | {num(r.get('auc'))} | "
-                    f"{num(r.get('ks'))} | {num(r.get('brier'))} | "
-                    f"{r.get('threshold'):.2f} | {pct(r.get('approval_rate'))} |"
-                    .replace(",", "."))
+                # Rodada reconstruída do dossiê não tem todos os campos: o log
+                # original é gitignored e só o AUC por segmento sobreviveu.
+                add(f"| {r.get('tag')} | {r.get('status', 'aceita')} | "
+                    f"{'—' if r.get('n_features') is None else format(r['n_features'], ',')} | "
+                    f"{num(r.get('auc'))} | {num(r.get('ks'))} | {num(r.get('brier'))} | "
+                    f"{'—' if r.get('threshold') is None else format(r['threshold'], '.2f')} | "
+                    f"{pct(r.get('approval_rate'))} |".replace(",", "."))
             add("")
 
     texto = "\n".join(L)

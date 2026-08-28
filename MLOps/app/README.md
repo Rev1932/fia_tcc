@@ -291,15 +291,20 @@ Isso confirma que o split não introduziu viés. **O valor é operacional:** em
 produção basta apontar `comparado` para a safra nova, e o mesmo cálculo vira o
 alerta de drift descrito em `MLOps/Readme.md`.
 
-#### `GET /model/fairness` — por que o intervalo de confiança importa
+#### `GET /model/fairness` — como uma fraqueza é declarada
 
-Cada grupo vem com IC bootstrap do AUC e o campo `overlaps_overall`. É o que
-separa **fraqueza real** de **ruído amostral**: um grupo pequeno com AUC menor
-por acaso não é evidência de nada.
+Cada grupo vem com IC bootstrap do AUC e com `vs_referencia`: o IC da **diferença**
+entre o AUC do grupo e o dos demais grupos do mesmo eixo. É esse o critério, exposto
+em `fraqueza_confirmada`.
 
-No modelo atual, apenas `<25` e `55-65` têm IC que **não** sobrepõe o geral —
-essas são as fraquezas reais. A diferença em thin-file, apesar de citada nos
-decks originais, fica dentro do ruído.
+O campo `overlaps_overall` compara com o AUC **geral** e está **deprecado**: o grupo é
+subconjunto do geral, e o geral é composto em sua maior parte por pares entre grupos —
+comparações que nenhum AUC intra-grupo realiza. A resposta traz também `decomposicao`,
+que mostra qual fração dos pares do AUC agregado é intra-grupo (22,4% no eixo etário).
+
+No modelo atual, `<25` (−0,0514, p = 0,008) e `55-65` (−0,0415, p = 0,004) são as
+fraquezas confirmadas. `65+`, thin-file e gênero não são. Veredito sobre o `<25` em
+`docs/diagnostico-faixa-etaria.md`.
 
 ---
 

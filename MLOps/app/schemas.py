@@ -478,8 +478,17 @@ class FairnessGroup(BaseModel):
     avg_score: float | None = None
     brier: float | None = None
     overlaps_overall: bool | None = Field(
-        None, description="IC do grupo sobrepõe o IC geral? Se não, a diferença "
-                          "de AUC é real e não ruído amostral")
+        None, description="DEPRECADO — compara com o AUC geral, que contém o próprio "
+                          "grupo e inclui pares entre grupos. Use `fraqueza_confirmada`.")
+    vs_referencia: dict | None = Field(
+        None, description="IC bootstrap da DIFERENÇA entre o AUC do grupo e o dos "
+                          "demais grupos do mesmo eixo")
+    fraqueza_confirmada: bool | None = Field(
+        None, description="O grupo é pior que os demais do mesmo eixo, pelo IC da "
+                          "diferença")
+    calibracao: dict | None = Field(
+        None, description="Previsto vs. observado no grupo — se o modelo acerta o "
+                          "NÍVEL de risco, questão distinta da ordenação medida pelo AUC")
 
 
 class FairnessResponse(BaseModel):
@@ -487,6 +496,11 @@ class FairnessResponse(BaseModel):
     threshold: float
     overall: dict[str, Any]
     groups: list[FairnessGroup]
+    criterio: dict[str, Any] | None = Field(
+        None, description="Regra que decide o que conta como fraqueza nesta rodada")
+    decomposicao: dict[str, Any] | None = Field(
+        None, description="AUC agregado separado em pares DENTRO e ENTRE grupos — "
+                          "mostra sobre quantos pares cada grupo é de fato medido")
 
 
 class ImprovementRun(BaseModel):

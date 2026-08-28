@@ -14,6 +14,8 @@ from sklearn.metrics import confusion_matrix, roc_auc_score
 
 from Model.metrics_lib import (
     auc_bootstrap_ci,
+    auc_diff_bootstrap,
+    auc_within_between,
     brier_score,
     business_threshold,
     calibration_points,
@@ -223,3 +225,77 @@ def test_psi_bins_somam_um():
     out = psi(rng.normal(size=3000), rng.normal(size=3000))
     assert sum(b["pct_esperado"] for b in out["bins"]) == pytest.approx(1.0, abs=1e-6)
     assert sum(b["pct_observado"] for b in out["bins"]) == pytest.approx(1.0, abs=1e-6)
+
+
+# ------------------------------------------- comparação entre segmentos
+
+@pytest.fixture(scope="module")
+def segmentado():
+    """Seis grupos com o mesmo sinal, menos o grupo 'A', degradado de propósito."""
+    rng = np.random.default_rng(11)
+    n = 6000
+    grupos = rng.choice(list("ABCDEF"), n)
+    y = (rng.random(n) < 0.09).astype(int)
+    s = rng.normal(0, 1, n) + 1.2 * y
+    m = grupos == "A"
+    s[m] = rng.normal(0, 1, m.sum()) + 0.45 * y[m]
+    return y, s, grupos
+
+
+def test_decomposicao_reconstroi_o_auc_agregado(segmentado):
+    """A decomposição é identidade, não aproximação: se não fecha, está errada."""
+    y, s, g = segmentado
+    d = auc_within_between(y, s, g)
+    assert d["auc_overall"] == pytest.approx(roc_auc_score(y, s), abs=1e-12)
+    recomposto = d["w_within"] * d["auc_within"] + d["w_between"] * d["auc_between"]
+    assert recomposto == pytest.approx(d["auc_overall"], abs=1e-9)
+    assert d["w_within"] + d["w_between"] == pytest.approx(1.0)
+
+
+def test_decomposicao_sem_sinal_entre_grupos():
+    """Grupos com distribuições idênticas não geram vantagem entre faixas."""
+    rng = np.random.default_rng(3)
+    n = 4000
+    g = rng.choice(list("XYZ"), n)
+    y = (rng.random(n) < 0.3).astype(int)
+    s = rng.normal(0, 1, n) + 0.8 * y
+    d = auc_within_between(y, s, g)
+    assert d["auc_between"] == pytest.approx(d["auc_within"], abs=0.03)
+
+
+def test_diferenca_detecta_grupo_degradado(segmentado):
+    y, s, g = segmentado
+    r = auc_diff_bootstrap(y, s, g, "A", n_boot=300)
+    assert r["diff"] < 0 and r["pior_que_referencia"] is True
+    assert r["diff_ci_low"] <= r["diff"] <= r["diff_ci_high"]
+    assert r["p_value"] < 0.05
+
+
+def test_diferenca_nao_acusa_grupo_normal(segmentado):
+    y, s, g = segmentado
+    r = auc_diff_bootstrap(y, s, g, "C", n_boot=300)
+    assert r["pior_que_referencia"] is False
+    assert r["diff_ci_low"] <= 0 <= r["diff_ci_high"]
+
+
+def test_diferenca_pesos_somam_um_e_excluem_o_alvo(segmentado):
+    y, s, g = segmentado
+    r = auc_diff_bootstrap(y, s, g, "A", n_boot=100)
+    assert "A" not in r["reference_weights"]
+    assert sum(r["reference_weights"].values()) == pytest.approx(1.0)
+
+
+def test_diferenca_e_deterministica(segmentado):
+    y, s, g = segmentado
+    a = auc_diff_bootstrap(y, s, g, "B", n_boot=100, random_state=7)
+    b = auc_diff_bootstrap(y, s, g, "B", n_boot=100, random_state=7)
+    assert a["diff_ci_low"] == b["diff_ci_low"]
+
+
+def test_diferenca_com_grupo_degenerado_nao_quebra():
+    """Grupo de uma classe só devolve nota, como auc_bootstrap_ci."""
+    y = np.array([0] * 40 + [1] * 40 + [0] * 40)
+    s = np.random.default_rng(0).random(120)
+    g = np.array(["A"] * 40 + ["A"] * 40 + ["B"] * 40, dtype=object)
+    out = auc_diff_bootstrap(y, s, g, "B", n_boot=20)
+    assert out.get("diff") is None or "note" in out

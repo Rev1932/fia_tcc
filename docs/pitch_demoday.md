@@ -100,12 +100,14 @@ Diagnóstico crítico — **é aqui que a banca vai testar se vocês entendem o 
   poder discriminativo por gênero. A menor taxa de aprovação para homens (60,4% vs.
   73,4%) reflete a taxa de default real observada (10,2% vs. 7,0%), não é viés
   arbitrário do modelo.
-- **Idade:** AUC cai nos extremos — menores de 25 anos (AUC 0,7319) e 55–65 anos
-  (AUC 0,7465) — o modelo é menos confiável justamente nos jovens, que têm a maior
-  taxa de default real (11,8%).
-- **Thin-file:** 14,3% da base não tem histórico de bureau. AUC menor (0,7745 vs.
-  0,7868) — mas o IC sobrepõe o geral, então a diferença está dentro do ruído e menos aprovação (56,5% vs. 71,1%) — confirma que menos dado disponível =
-  score menos confiável.
+- **Idade:** AUC cai nos extremos — menores de 25 anos (0,7319) e 55–65 anos (0,7465) —
+  o modelo **ordena** pior justamente nos jovens, que têm a maior taxa de default real
+  (11,8%). Diagnosticado até o fim: a causa **não** é falta de histórico (uma coorte de
+  25–45 anos com o mesmo perfil de informação atinge 0,7803), e nenhum modelo dedicado
+  supera o geral. É teto de dado. Detalhe: `docs/diagnostico-faixa-etaria.md`.
+- **Thin-file:** 14,3% da base não tem histórico de bureau. AUC menor (0,7745 contra
+  0,7878 de quem tem bureau) e aprovação menor (56,5% contra 71,1%) — mas a diferença
+  de AUC (−0,0133, p = 0,132) **não é estatisticamente estabelecida**.
 - **Mitigação proposta:** revisão humana (human-in-the-loop) para os segmentos de
   AUC mais baixo, em vez de decisão 100% automática — conectado à arquitetura de
   deploy (`MLOps/Readme.md`).
@@ -126,7 +128,10 @@ Diagnóstico crítico — **é aqui que a banca vai testar se vocês entendem o 
 |---|---|
 | "Por que LightGBM e não outro modelo?" | Lida nativamente com nulos e categóricas de alta cardinalidade; testado contra baseline interpretável (regressão logística) para ter referência. |
 | "Como vocês sabem que não é overfitting?" | AUC validação (0,7835) ≈ AUC teste (0,7871) — se fosse overfitting, o teste cairia bem abaixo da validação. Early stopping (507 iterações) foi o mecanismo de controle. |
-| "O modelo discrimina por gênero/idade?" | Não por gênero (AUC quase igual, diferença de aprovação reflete risco real medido). Por idade, sim há uma fraqueza real: AUC mais baixo em <25 e 55-65 — assumimos isso como limitação e propomos revisão humana nesses casos. |
+| "O modelo discrimina por gênero/idade?" | Não por gênero (AUC quase igual, diferença de aprovação reflete risco real medido). Por idade há fraqueza de **ordenação** confirmada em <25 e 55-65 (IC da diferença contra as demais faixas exclui o zero). Diagnosticamos a causa: não é falta de histórico — coorte pareada de 25–45 anos com o mesmo perfil de informação chega a 0,7803. É teto de dado, e a mitigação é revisão humana. |
+| "E a faixa 55-65?" | Também diagnosticada, e falha por outro motivo. Não é aposentadoria — apesar de 68% da faixa ser aposentada, dentro dela aposentado e ativo empatam (0,7488 × 0,7427). A causa é que os três scores externos rendem ali o pior de todas as faixas. O modelo agrega o normal sobre um sinal ruim: o déficit é da fonte, não da modelagem. |
+| "Vocês testaram consertar a faixa <25?" | Duas vezes, ambas rejeitadas e registradas. Reponderar o treino (`v4-pesos-idade`) piorou o alvo em 0,0032. Modelo segmentado: seis variantes, **todas abaixo** do geral (melhor 0,7296 contra 0,7319). É o que sustenta o veredito de teto, em vez de opinião. |
+| "O modelo é justo com os jovens?" | Ele acerta que jovens caem mais (11,8% contra 8,07%) — isso é fato da base, monotônico na idade. Mas **exagera**: é a única faixa com viés de calibração, prevendo 13,4% onde ocorrem 11,8%. Causa identificada (isotônica global) e medida; o conserto está em avaliação porque reduz a aprovação da faixa em vez de aumentá-la. |
 | "E os clientes sem histórico de crédito (thin-file)?" | 14,3% da base, AUC 0,7745 contra 0,7871 do geral — mas o intervalo de confiança sobrepõe, então a diferença **não é estatisticamente estabelecida**. Mitigação de qualquer forma: revisão humana, não decisão 100% automática. |
 | "Qual o impacto financeiro real?" | Threshold calibrado por matriz de custo (FN custa 10x mais que FP) resulta em ~70% de aprovação — cada ponto de threshold pode ser traduzido em R$ evitado vs. volume aprovado (ver seção 3 do `evaluation.ipynb`). |
 | "Como isso vira produto?" | Etapa individual: API FastAPI + dashboard Streamlit, orquestração via `pipeline_orchestration.py`, infra em `docker-compose`, com monitoramento de drift e ações automatizadas descritas no `MLOps/Readme.md`. |

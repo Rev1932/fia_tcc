@@ -198,9 +198,10 @@ with aba_modelo:
     st.line_chart(pts.set_index("threshold")[["cost"]])
 
     st.subheader("Onde o modelo é confiável")
-    st.caption("O intervalo de confiança separa fraqueza real de ruído amostral: "
-               "`sobrepõe o geral = não` indica diferença que o tamanho da "
-               "amostra não explica.")
+    st.caption("Um grupo é fraqueza quando o IC da DIFERENÇA entre o AUC dele e o dos "
+               "demais grupos do mesmo eixo exclui o zero (`fraqueza confirmada`). "
+               "`sobrepõe o geral` compara com o AUC geral e está deprecado: o grupo é "
+               "subconjunto do geral.")
     dim = st.radio("Segmento", ["age_band", "gender", "thin_file"], horizontal=True)
     fr = get_opcional("/model/fairness", by=dim)
     if fr is None:
@@ -210,12 +211,19 @@ with aba_modelo:
     else:
         tabela = pd.DataFrame(fr["groups"])
     if not tabela.empty:
-        cols = ["group", "n", "auc", "ci_low", "ci_high", "overlaps_overall",
+        if "vs_referencia" in tabela:
+            vs = tabela["vs_referencia"].apply(lambda v: v or {})
+            tabela["diff"] = vs.apply(lambda v: v.get("diff"))
+            tabela["p_value"] = vs.apply(lambda v: v.get("p_value"))
+        cols = ["group", "n", "auc", "ci_low", "ci_high", "diff", "p_value",
+                "fraqueza_confirmada", "overlaps_overall",
                 "approval_rate", "default_rate"]
         st.dataframe(
             tabela[[c for c in cols if c in tabela]]
             .rename(columns={"group": "grupo", "auc": "AUC", "ci_low": "IC inf",
-                             "ci_high": "IC sup", "overlaps_overall": "sobrepõe o geral",
+                             "ci_high": "IC sup", "diff": "Δ vs. demais",
+                             "p_value": "p", "fraqueza_confirmada": "fraqueza",
+                             "overlaps_overall": "sobrepõe o geral (depr.)",
                              "approval_rate": "aprovação",
                              "default_rate": "inadimplência real"}),
             use_container_width=True, hide_index=True)

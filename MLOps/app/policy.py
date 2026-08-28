@@ -46,21 +46,27 @@ def decide(p: float, threshold: float, band: float = 0.0) -> Decision:
 
 
 def low_confidence_groups(fairness: dict) -> dict[str, list[str]]:
-    """Segmentos cujo IC de AUC fica INTEIRAMENTE abaixo do IC geral.
+    """Segmentos com desempenho pior que o dos DEMAIS grupos do mesmo eixo.
 
-    Usar o intervalo, e não o ponto, é o que separa fraqueza real de ruído
-    amostral — sem isso, um grupo pequeno com AUC menor por acaso entraria
-    na lista e mandaria gente para revisão humana sem motivo.
+    O critério é o IC bootstrap da diferença (`fraqueza_confirmada`), e não a
+    comparação com o AUC geral: um segmento é subconjunto do geral, e o AUC
+    geral conta pares entre grupos que nenhum AUC intra-grupo tem. Comparar os
+    dois é comparar quantidades diferentes.
+
+    Artefatos anteriores a essa mudança não trazem o campo; para eles vale o
+    critério antigo, senão uma rodada velha em disco deixaria a API sem régua.
     """
-    overall = fairness.get("overall") or {}
-    ref = overall.get("ci_low")
-    if ref is None:
-        return {}
-
     out: dict[str, list[str]] = {}
+    ref = (fairness.get("overall") or {}).get("ci_low")
+
     for dim, groups in (fairness.get("dimensions") or {}).items():
-        fracos = [g["group"] for g in groups
-                  if g.get("ci_high") is not None and g["ci_high"] < ref]
+        if any("fraqueza_confirmada" in g for g in groups):
+            fracos = [g["group"] for g in groups if g.get("fraqueza_confirmada")]
+        elif ref is None:
+            continue
+        else:
+            fracos = [g["group"] for g in groups
+                      if g.get("ci_high") is not None and g["ci_high"] < ref]
         if fracos:
             out[dim] = fracos
     return out
@@ -99,7 +105,8 @@ def policy_summary(fairness: dict, base_band: float = DEFAULT_BAND) -> dict:
         "base_band": base_band,
         "low_confidence_factor": LOW_CONFIDENCE_FACTOR,
         "low_confidence_groups": low_confidence_groups(fairness),
-        "criterio": ("um grupo entra na lista quando o limite SUPERIOR do seu IC de "
-                     "AUC fica abaixo do limite INFERIOR do IC geral — ou seja, "
-                     "quando a diferença não é explicável por ruído amostral"),
+        "criterio": ((fairness.get("criterio") or {}).get("descricao")
+                     or "um grupo entra na lista quando o limite SUPERIOR do seu IC de "
+                        "AUC fica abaixo do limite INFERIOR do IC geral (critério "
+                        "anterior, mantido para artefatos antigos)"),
     }
