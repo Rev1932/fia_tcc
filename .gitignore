@@ -26,4 +26,5 @@ artifacts_v3_baseline/
 # Airflow: logs de execução e o .env com o UID local
 MLOps/airflow/logs/
 MLOps/airflow/.env
+MLOps/airflow/auth/
 artifacts_pre_airflow/
