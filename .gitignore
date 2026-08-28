@@ -1,6 +1,5 @@
-# Dados brutos (>3GB) e tudo que o pipeline gera a partir deles.
-# O diretório inteiro fica fora do versionamento: os 9 CSVs do Kaggle somam
-# 2,6 GB e nada aqui é insumo de código — é entrada baixada ou saída gerada.
+# Dados brutos e tudo que o pipeline gera a partir deles: 2,6 GB de CSVs do
+# Kaggle mais as saídas. Nada aqui é insumo de código.
 data/
 Dados/
 
