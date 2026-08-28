@@ -75,15 +75,49 @@ curl -X POST http://localhost:8000/predict \
 | **Concept drift** | AUC vs. a rodada anterior aceita | Barrar a promoção do modelo | ✅ `validar_metricas` — **falha a DAG** |
 | **Qualidade dos dados** | fontes presentes, granularidade da ABT, vazamento | Bloquear antes do treino | ✅ `checar_fontes` e `validar_abt` |
 | **Re-treino** | — | Agendado | ✅ a cada 7 dias |
-| **Performance do serviço** | latência, taxa de erro, throughput | Auto-scaling / rollback | ⬜ proposta |
-| **Negócio** | aprovação e inadimplência observadas | Recalibrar threshold | ⬜ proposta (o cálculo existe em `/model/threshold-analysis`) |
+| **Performance do serviço** | latência, taxa de erro, throughput | Auto-scaling / rollback | ✅ `GET /metrics` + Prometheus e Grafana, com alertas |
+| **Disponibilidade** | serviço no ar e capaz de pontuar | Alerta e investigação | ✅ alertas `APIForaDoAr` e `ModeloNaoCarregado` |
+| **Negócio (ao vivo)** | volume e distribuição das decisões | Recalibrar threshold | ✅ `hc_predicoes_total` e `hc_score_previsto` no painel |
+| **Negócio (contrafactual)** | e se o custo do falso negativo mudasse? | Recalibrar threshold | ✅ `GET /model/threshold-analysis` |
 
-As quatro primeiras linhas **executam**: são tasks do DAG, com log por etapa e
-`artifacts/psi_report.json` gravado a cada rodada. As duas últimas seguem como
-proposta — exigiriam telemetria de produção, que este projeto não tem.
+Todas **executam**. As quatro primeiras são tasks do DAG, com log por etapa e
+`artifacts/psi_report.json` gravado a cada rodada. As três seguintes são telemetria
+contínua, coletada a cada 10 segundos — ver §3.1.
 
-Evolução: logs estruturados → Prometheus/Grafana; *model registry* (MLflow) para
-versionar modelos e habilitar rollback.
+Evolução: logs estruturados (a aplicação ainda não usa `logging`); *model registry*
+(MLflow) para versionar modelos e habilitar rollback.
+
+### 3.1 Telemetria de serviço — Prometheus + Grafana
+
+Stack própria em `MLOps/monitoring/`, separada pelo mesmo motivo que o Airflow é
+separado: o observador precisa poder cair e subir sem tocar em quem está servindo.
+
+```bash
+make obs-up          # exige a stack de serving no ar (a rede vem dela)
+#   Grafana ......  http://localhost:3000   sem login, painel já provisionado
+#   Prometheus ...  http://localhost:9090
+make obs-alertas     # o que está disparando agora
+make obs-alvos       # o Prometheus está enxergando a API?
+```
+
+A API expõe `GET /metrics` (fora do OpenAPI, para não alterar a contagem de
+endpoints). Três famílias: HTTP (`http_requests_total`, `http_request_duration_seconds`),
+saúde lida de `app.state` no momento do scrape, e negócio, incrementada nos caminhos
+de predição.
+
+**Por que não há blackbox_exporter.** O `up` do Prometheus só diz que o `/metrics`
+respondeu. Como o uvicorn continua vivo quando o modelo não carrega, `up` ficaria `1`
+com a API **incapaz de pontuar um único cliente** — exatamente o caso em que o
+`/health` devolve 503. O gauge `hc_api_pronta` cobre isso em cinco linhas, e ainda diz
+*qual* componente falhou (`hc_erro_componente`). Sondar de fora só se pagaria se o
+alvo estivesse fora da nossa rede ou não pudesse ser instrumentado.
+
+**Verificado ponta a ponta:** com `make mlops-stop`, o `up` vai a `0` e o alerta
+`APIForaDoAr` passa a *firing* em ~1 min; `make mlops-start` resolve.
+
+> O `/metrics` é aberto, como todo o resto da API (ver `TODO.md §3.5`). Ele expõe
+> volume, latência e distribuição de decisões — **nenhum dado de cliente**. Em
+> produção entraria atrás da mesma autenticação que os demais endpoints.
 
 ## 4. Ações automatizadas + agentes de IA (item iv)
 

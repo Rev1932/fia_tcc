@@ -23,6 +23,12 @@ requests==2.34.2   # o dashboard consome a API por HTTP
 pydantic==2.13.4
 duckdb==1.5.5
 
+# Observabilidade — /metrics no formato Prometheus.
+# prometheus-client já vinha transitivo do jupyter; pinar torna explícito e
+# impede que a API quebre se o Jupyter sair do requirements.
+prometheus-client==0.26.0
+prometheus-fastapi-instrumentator==8.1.0
+
 # Testes
 pytest==9.1.1
 httpx==0.28.1

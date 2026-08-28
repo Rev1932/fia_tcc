@@ -1,0 +1,61 @@
+# Regras de indisponibilidade e degradação da API.
+#
+# `up` e `hc_api_pronta` respondem a perguntas diferentes, e é essa distinção
+# que justifica não ter um blackbox_exporter aqui: o uvicorn continua servindo
+# /metrics quando o modelo não carrega, então `up` ficaria 1 com a API incapaz
+# de pontuar um único cliente. O segundo alerta é quem pega esse caso.
+
+groups:
+  - name: disponibilidade
+    rules:
+      - alert: APIForaDoAr
+        expr: up{job="hc-api"} == 0
+        for: 1m
+        labels:
+          severidade: critica
+        annotations:
+          resumo: "API de credit scoring inalcançável"
+          descricao: "O scrape de {{ $labels.instance }} falha há mais de 1 minuto."
+
+      - alert: ModeloNaoCarregado
+        expr: hc_api_pronta == 0
+        for: 1m
+        labels:
+          severidade: critica
+        annotations:
+          resumo: "API no ar, mas sem conseguir pontuar"
+          descricao: "Processo responde, porém modelo ou ABT não carregaram — /health devolve 503."
+
+      - alert: ComponenteDegradado
+        expr: hc_erros_ativos > 0
+        for: 5m
+        labels:
+          severidade: aviso
+        annotations:
+          resumo: "{{ $value }} componente(s) com erro no startup"
+          descricao: "Ver o campo `errors` do /health. Artefato ou explainer ausente degrada sem derrubar."
+
+  - name: performance
+    rules:
+      - alert: LatenciaAlta
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le, handler) (rate(http_request_duration_seconds_bucket{job="hc-api"}[5m]))
+          ) > 1
+        for: 5m
+        labels:
+          severidade: aviso
+        annotations:
+          resumo: "p95 acima de 1s em {{ $labels.handler }}"
+          descricao: "Latência p95 em {{ $value | printf \"%.2f\" }}s nos últimos 5 minutos."
+
+      - alert: TaxaErro5xx
+        expr: |
+          sum(rate(http_requests_total{job="hc-api", status="5xx"}[5m]))
+          / clamp_min(sum(rate(http_requests_total{job="hc-api"}[5m])), 0.001) > 0.05
+        for: 5m
+        labels:
+          severidade: critica
+        annotations:
+          resumo: "Mais de 5% das respostas em 5xx"
+          descricao: "Taxa de erro do servidor em {{ $value | printf \"%.1%\" }} nos últimos 5 minutos."

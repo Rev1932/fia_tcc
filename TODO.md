@@ -21,12 +21,13 @@ ou por outra pessoa — sem precisar reconstruir o contexto.
 | ABT | ✅ 1.020 colunas — categóricas das tabelas relacionais recuperadas |
 | Modelo | ✅ LightGBM calibrado (servido), AUC 0,7868 · KS 0,4342 · Brier 0,0658 |
 | Rodada canônica | ✅ Congelada em `artifacts/`, é fonte única de verdade |
-| API | ✅ 27 endpoints, documentação própria, 131 testes passando (11 pulados: DAG sem Airflow instalado) |
+| API | ✅ 27 endpoints, documentação própria, 148 testes passando (11 pulados: DAG sem Airflow instalado) |
 | Dashboard | ✅ Executado e coberto por `tests/test_dashboard.py` |
 | Docker | ✅ Build e stack verificados, healthcheck falha corretamente |
 | Orquestração | ✅ Airflow 3.3.1 em Docker, DAG de 9 tasks a cada 7 dias |
 | Documentação | ✅ README, TCC, pitch e guia reconciliados com os artefatos |
 | Monitoramento de drift | ✅ `GET /model/psi` implementado e testado |
+| Telemetria de serviço | ✅ `GET /metrics` + Prometheus/Grafana, com alertas de indisponibilidade |
 | Notebook de avaliação | ✅ Reescrito lendo de `artifacts/`, re-executado nesta máquina |
 | Slides | ✅ `credit_scoring_deck_v3.pptx` — falta só um slide de calibração, à mão |
 | Fraqueza em `<25 anos` | ✅ **Diagnosticada e com veredito**: teto de dado, não defeito de modelo. Causa declarada anteriormente (falta de histórico) **refutada**. Dois consertos testados e rejeitados. Ver [`docs/diagnostico-faixa-etaria.md`](docs/diagnostico-faixa-etaria.md) |

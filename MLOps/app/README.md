@@ -291,6 +291,25 @@ Isso confirma que o split não introduziu viés. **O valor é operacional:** em
 produção basta apontar `comparado` para a safra nova, e o mesmo cálculo vira o
 alerta de drift descrito em `MLOps/Readme.md`.
 
+#### `GET /metrics` — telemetria no formato Prometheus
+
+Fora do OpenAPI de propósito: é rota de infraestrutura, não de produto, e incluí-la
+mudaria a contagem de 27 endpoints citada em quatro documentos.
+
+Três famílias de série: **HTTP** (`http_requests_total`, `http_request_duration_seconds`,
+com status agrupado em 2xx/4xx/5xx e `handler` pelo template da rota, não pela URL
+concreta — senão cada `/clients/{id}` viraria uma série nova); **saúde**
+(`hc_api_pronta`, `hc_model_loaded`, `hc_erro_componente`, lidas de `app.state` no
+momento do scrape, sem tocar no DuckDB); e **negócio** (`hc_predicoes_total` por
+decisão e endpoint, `hc_score_previsto` como histograma).
+
+`hc_api_pronta` replica a regra do 200 vs 503 do `/health`. É ela que distingue
+"processo no ar" de "processo capaz de pontuar" — o `up` do Prometheus só sabe a
+primeira. Ver `MLOps/Readme.md §3.1`.
+
+Consumido por `MLOps/monitoring/` (`make obs-up`). Como o resto da API, não tem
+autenticação; expõe volume e latência, nenhum dado de cliente.
+
 #### `GET /model/fairness` — como uma fraqueza é declarada
 
 Cada grupo vem com IC bootstrap do AUC e com `vs_referencia`: o IC da **diferença**
