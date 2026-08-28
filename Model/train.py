@@ -41,6 +41,8 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from Model.metrics_lib import (  # noqa: E402
     auc_bootstrap_ci,
+    auc_diff_all_groups,
+    auc_within_between,
     brier_score,
     business_threshold,
     calibration_points,
@@ -139,12 +141,28 @@ def age_band(years: float) -> str:
     return "65+"
 
 
+CRITERIO_FRAQUEZA = {
+    "nome": "bootstrap_da_diferenca_intra_eixo",
+    "descricao": (
+        "Um grupo conta como fraqueza quando o IC 95% da DIFERENÇA entre o seu AUC "
+        "e o AUC de referência — a média, ponderada por pares, do AUC medido DENTRO "
+        "de cada um dos demais grupos do mesmo eixo — fica inteiramente abaixo de "
+        "zero. Substitui o critério anterior (IC do grupo sem sobrepor o IC geral), "
+        "que era inválido: o grupo é subconjunto do geral, e o AUC geral inclui "
+        "pares entre grupos que nenhum AUC intra-grupo tem."),
+    "criterio_anterior": "ci_high(grupo) < ci_low(geral)",
+}
+
+
 def segment_report(X, y, score, threshold: float, n_boot: int) -> dict:
     """AUC (com IC bootstrap), aprovação e default real por segmento sensível.
 
     O IC é o que separa fraqueza real de ruído amostral: o grupo <25 tem
     ~2,4 mil clientes no teste, então um AUC menor pode ser só tamanho de
     amostra. Sem esse número, a conclusão do trabalho fica indefensável.
+
+    A comparação entre grupos usa o IC da DIFERENÇA contra os demais grupos do
+    mesmo eixo (`vs_referencia`), e não o AUC geral — ver CRITERIO_FRAQUEZA.
     """
     y = np.asarray(y).astype(int)
     score = np.asarray(score, dtype=float)
@@ -161,6 +179,7 @@ def segment_report(X, y, score, threshold: float, n_boot: int) -> dict:
 
     out = {
         "threshold": float(threshold),
+        "criterio": CRITERIO_FRAQUEZA,
         "overall": {
             **auc_bootstrap_ci(y, score, n_boot=n_boot),
             "approval_rate": float((score < threshold).mean()),
@@ -168,14 +187,19 @@ def segment_report(X, y, score, threshold: float, n_boot: int) -> dict:
             "brier": brier_score(y, score),
         },
         "dimensions": {},
+        "decomposicao": {},
     }
 
     for dim, values in segments.items():
+        rotulos = values.to_numpy()
+        # Uma passada de bootstrap por eixo, compartilhada por todos os grupos.
+        difs = auc_diff_all_groups(y, score, rotulos, n_boot=n_boot)
         groups = []
         for g in sorted(v for v in values.dropna().unique()):
             m = (values == g).to_numpy()
             if m.sum() < 30:
                 continue
+            vs = difs.get(g)
             groups.append({
                 "group": str(g),
                 **auc_bootstrap_ci(y[m], score[m], n_boot=n_boot),
@@ -184,8 +208,18 @@ def segment_report(X, y, score, threshold: float, n_boot: int) -> dict:
                 "default_rate": float(y[m].mean()),
                 "avg_score": float(score[m].mean()),
                 "brier": brier_score(y[m], score[m]),
+                "vs_referencia": vs,
+                "fraqueza_confirmada": bool((vs or {}).get("pior_que_referencia")),
+                # Ordenar mal (AUC) e errar o NÍVEL de risco são coisas
+                # diferentes; sem este bloco a segunda não é medida.
+                "calibracao": {
+                    "previsto": float(score[m].mean()),
+                    "observado": float(y[m].mean()),
+                    "gap": float(score[m].mean() - y[m].mean()),
+                },
             })
         out["dimensions"][dim] = groups
+        out["decomposicao"][dim] = auc_within_between(y, score, rotulos)
     return out
 
 
@@ -529,7 +563,11 @@ def main() -> None:
         "approval_rate": approval,
         "segments": {
             dim: {g["group"]: {"auc": g["auc"], "ci_low": g["ci_low"],
-                               "ci_high": g["ci_high"], "n": g["n"]}
+                               "ci_high": g["ci_high"], "n": g["n"],
+                               # o veredito do segmento, e não só o AUC: é o que
+                               # permite ver se uma rodada MUDOU a classificação
+                               "diff": (g.get("vs_referencia") or {}).get("diff"),
+                               "fraqueza_confirmada": g.get("fraqueza_confirmada")}
                   for g in groups}
             for dim, groups in fairness["dimensions"].items()
         },
