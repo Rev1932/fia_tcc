@@ -37,7 +37,7 @@ do discurso) e entenda a **explicação completa** (para quando a banca pergunta
 - *1 frase:* "Thin-file é o cliente sem histórico de crédito — a 'pasta fina', sem registro em bureau."
 - *Completo:* 14,3% da nossa base não tem nenhum registro de bureau. Para esses, o
   modelo tem menos informação. O AUC é menor (0,7745 vs 0,7871), mas o
-  intervalo de confiança sobrepõe o geral — a diferença NÃO está estabelecida (AUC 0,773 vs 0,7871
+  IC da diferença contra quem tem bureau cruza o zero (p = 0,132) — a diferença NÃO está estabelecida (AUC 0,7745 vs 0,7878
   no geral). É o público que mais precisa de crédito e o mais difícil de avaliar.
 
 **Threshold (régua de decisão / ponto de corte)**
@@ -182,9 +182,11 @@ do discurso) e entenda a **explicação completa** (para quando a banca pergunta
   - **Diferença de aprovação ≠ viés.** Homens são menos aprovados (60,6% vs 74,3%)
     porque dão mais default de fato (10,2% vs 7,0%). O AUC por gênero é quase igual
     (0,7872 M vs 0,7795 F) → o modelo **discrimina risco, não pessoas**.
-  - **Queda de AUC = fraqueza real.** Em <25 anos (AUC 0,7319) e 55–65 (0,7465) o
-    modelo enxerga pior. E os jovens são justamente o grupo de maior default real
-    (11,7%). Isso nós **assumimos como limitação** e mitigamos.
+  - **Queda de AUC = fraqueza confirmada.** Em <25 anos (AUC 0,7319) e 55–65 (0,7465)
+    o modelo **ordena** pior. E os jovens são o grupo de maior default real (11,8%).
+    Diagnosticado até a causa: **não** é falta de histórico — coorte pareada de 25–45
+    anos com o mesmo perfil de informação chega a 0,7803. É teto de dado, e nenhum
+    modelo dedicado supera o geral. Mitigação: revisão humana.
 
 **Human-in-the-loop**
 - *1 frase:* "Nos segmentos onde o modelo é fraco, a decisão não é 100% automática: vai para um analista humano com o relatório SHAP do caso."
@@ -368,9 +370,10 @@ importante."*
 > Homens são menos aprovados, sim — 60,6% contra 74,3% — mas porque dão mais default
 > de fato: 10,2% contra 7,0%. **O modelo discrimina risco, não pessoas.**"
 >
-> "**Idade: aqui há uma fraqueza real.** O AUC cai nos extremos — 0,739 nos menores
-> de 25 anos, 0,744 na faixa 55 a 65. E os jovens são justamente o grupo de maior
-> default: 11,7%. **O modelo enxerga pior exatamente onde o risco é maior.**"
+> "**Idade: aqui há uma fraqueza confirmada.** O AUC cai nos extremos — 0,7319 nos
+> menores de 25 anos, 0,7465 na faixa 55 a 65. E os jovens são justamente o grupo de
+> maior default: 11,8%. **O modelo ordena pior exatamente onde o risco é maior.** Nós
+> fomos atrás da causa: não é falta de histórico, é teto do dado disponível."
 >
 > "**Thin-file:** 14,3% da base não tem histórico de bureau. AUC menor — 0,773 — e
 > aprovação bem menor: 57,3% contra 71,7%. Confirma a tese: menos dado, score menos
@@ -438,12 +441,14 @@ distinção que muda a conclusão do trabalho.
 |---|---|---|---|---|---|
 | Homens | 0,7872 | [0,7778–0,7963] | 60,4% | 10,17% | AUC igual ao das mulheres → **não é viés** |
 | Mulheres | 0,7795 | [0,7709–0,7886] | 73,4% | 6,99% | aprovação maior porque o risco real é menor |
-| < 25 anos | **0,7319** | [0,7012–0,7597] | 41,5% | 11,80% | **fraqueza real** — IC não sobrepõe |
-| 55–65 anos | **0,7465** | [0,7281–0,7672] | 79,9% | 5,61% | **fraqueza real** — IC não sobrepõe |
+| < 25 anos | **0,7319** | [0,7012–0,7597] | 41,5% | 11,80% | **fraqueza** — Δ −0,0514 vs. demais, p = 0,008 |
+| 55–65 anos | **0,7465** | [0,7281–0,7672] | 79,9% | 5,61% | **fraqueza** — Δ −0,0415 vs. demais, p = 0,004 |
+| 65+ anos | 0,7631 | [0,7084–0,8100] | 89,9% | 3,71% | não — Δ −0,0198, p = 0,395 |
 | Thin-file | 0,7745 | [0,7577–0,7899] | 56,5% | 10,14% | diferença **dentro do ruído** |
 
-*Padrão para decorar: "**gênero OK; idade é fraqueza real e medida; thin-file entra no
-ruído — mitigação: faixa cinza ampliada, com humano no loop**".*
+*Padrão para decorar: "**gênero OK; idade é fraqueza medida E diagnosticada — teto de
+dado, não falta de histórico; thin-file entra no ruído — mitigação: faixa cinza ampliada,
+com humano no loop**".*
 
 > ⚠️ Mudança em relação à versão anterior do trabalho: os decks antigos afirmavam que
 > thin-file era uma fraqueza comprovada. Com intervalo de confiança, **não é** — a
@@ -485,10 +490,12 @@ Decore a **primeira frase** de cada resposta — ela ganha tempo e mostra segura
 > num viés do algoritmo."
 
 **"E por idade?"**
-> "Por idade, sim, há uma fraqueza real e nós a assumimos: o AUC cai para 0,739 nos
-> menores de 25 e 0,744 na faixa 55–65. Nossa resposta não é esconder isso, é
-> desenhar o processo em volta: revisão humana com relatório SHAP para esses
-> segmentos."
+> "Por idade, sim, há uma fraqueza de ordenação e nós a medimos: AUC 0,7319 nos
+> menores de 25 e 0,7465 na faixa 55–65 — e comparada contra as demais faixas, não
+> contra o AUC geral, que é a comparação errada. Fomos atrás da causa: não é falta de
+> histórico. Um cliente de 33 anos com exatamente a mesma pobreza de dados do jovem é
+> ranqueado a 0,7803. E nenhum modelo dedicado ao segmento supera o geral. É teto do
+> dado. Nossa resposta não é esconder: é revisão humana com relatório SHAP."
 
 **"E os clientes sem histórico (thin-file)?"**
 > "São 14,3% da base. O modelo perde poder — AUC 0,773 contra 0,7871 — e aprova menos:

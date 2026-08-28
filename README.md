@@ -74,19 +74,42 @@ maximizando o resultado financeiro.
 
 ### Onde o modelo ainda falha (e por que dizemos isso com números)
 
-Cada AUC por segmento vem com **intervalo de confiança bootstrap**. Um grupo só conta
-como fraqueza real quando seu IC **não sobrepõe** o geral (0,7806–0,7935):
+Um grupo conta como fraqueza quando o **IC bootstrap da diferença** entre o AUC dele e o
+dos demais grupos do mesmo eixo exclui o zero. O critério anterior comparava o segmento
+com o AUC **geral** — que contém o próprio segmento e é composto 77,6% por pares entre
+faixas etárias. Ver [`docs/diagnostico-faixa-etaria.md §5`](docs/diagnostico-faixa-etaria.md).
 
-| Segmento | n | AUC [IC 95%] | Fraqueza real? |
-|---|---|---|---|
-| `<25 anos` | 2.355 | 0,7319 [0,7012–0,7597] | **sim** |
-| `55-65 anos` | 12.166 | 0,7465 [0,7281–0,7672] | **sim** |
-| Thin-file | 8.776 | 0,7745 [0,7577–0,7899] | não — sobrepõe |
-| Gênero M vs F | 20.940 / 40.561 | 0,7872 / 0,7795 | não — discrimina risco, não pessoas |
+| Segmento | n | AUC [IC 95%] | Δ vs. demais [IC 95%] | p | Fraqueza? |
+|---|---|---|---|---|---|
+| `<25 anos` | 2.355 | 0,7319 [0,7012–0,7597] | −0,0514 [−0,0827 – −0,0205] | 0,008 | **sim** |
+| `55-65 anos` | 12.166 | 0,7465 [0,7281–0,7672] | −0,0415 [−0,0619 – −0,0209] | 0,004 | **sim** |
+| `65+ anos` | 1.725 | 0,7631 [0,7084–0,8100] | −0,0198 [−0,0696 – +0,0331] | 0,395 | não |
+| Thin-file | 8.776 | 0,7745 [0,7577–0,7899] | −0,0133 [−0,0299 – +0,0043] | 0,132 | não |
+| Gênero M vs F | 20.940 / 40.561 | 0,7872 / 0,7795 | ±0,0078 [−0,0195 – +0,0195] | 0,240 | não |
 
-As correções melhoraram o modelo geral mas **não resolveram a fraqueza em `<25`**.
-A resposta para esse caso é de processo, não de modelagem: faixa cinza ampliada →
-revisão humana (`GET /model/decision-policy`).
+**A fraqueza em `<25` foi diagnosticada e tem veredito: é teto de dado, não defeito de
+modelo — mas não pela causa que este projeto vinha declarando.**
+
+- Não é ausência de histórico. Uma coorte de 25–45 anos reamostrada até reproduzir o
+  perfil de informação do jovem (71 estratos, 99,9% de cobertura) atinge **AUC 0,7803**
+  contra 0,7319 do jovem. **A causa declarada foi refutada.**
+- ~36% do efeito nem é sobre idade: é sobre estar na região baixa do score externo, onde
+  o modelo separa pior em qualquer faixa.
+- Não há conserto disponível: seis variantes de modelo dedicado (`<25` e `<30`) ficam
+  **todas abaixo** do modelo geral; a reponderação já havia sido rejeitada em `v4`.
+- Achado novo: `<25` é a **única** faixa com viés de calibração — prevê 13,4% onde
+  ocorrem 11,8% (+1,6 pp, IC [+0,4 – +2,9]). Causa: a isotônica é ajustada globalmente.
+
+**A faixa `55-65` também foi diagnosticada — e falha por outro motivo.** Não é
+aposentadoria (dentro da faixa, aposentado 0,7488 e ativo 0,7427 são indistinguíveis,
+apesar de 68,4% dela ser aposentada) nem perfil de informação (coorte pareada chega a
+0,7906, e a faixa é pior em 100% das réplicas). A causa é que os três scores externos
+rendem ali o **pior de todas as faixas**. Ali o modelo agrega o normal (0,0744) sobre um
+sinal ruim — é deficiência da fonte; no `<25` o modelo agrega o **mínimo** (0,0518), então
+falta também no que ele extrai do resto.
+
+A resposta continua sendo de processo: faixa cinza ampliada → revisão humana
+(`GET /model/decision-policy`), agora fundamentada num teste válido.
 
 ## 📁 Estrutura
 
@@ -94,14 +117,17 @@ revisão humana (`GET /model/decision-policy`).
 Dados/            raw_data.csv · clean_data.csv · abt.csv · abt.parquet   (gerados; fora do git)
 DataPipeline/     data_sanitization.py · abt_transform.py · to_parquet.py · exp_analysis.ipynb · config.yaml
 Model/            train.py · predict.py · metrics_lib.py · derived.py · run_summary.py · evaluation.ipynb · config.yaml
+                  diagnostico_idade.py · experimento_teto_idade.py   (diagnóstico da faixa etária)
+scripts/          restaurar_improvement_log.py · regenerar_fairness.py
 dags/             treino_credit_scoring.py · callables.py   (o DAG de re-treino)
 MLOps/            Readme.md · Dockerfile · docker-compose.yml · pipeline_orchestration.py
 MLOps/airflow/    Dockerfile · docker-compose.yml · README.md   (a instância do Airflow)
 MLOps/app/        api.py · db.py · schemas.py · explain.py · policy.py · routers/ · README.md · requests.http
-tests/            test_metrics_lib.py · test_derived.py · test_api.py ·
-                  test_security.py · test_dashboard.py · test_dags.py
+tests/            test_metrics_lib.py · test_derived.py · test_api.py · test_policy.py ·
+                  test_split.py · test_security.py · test_dashboard.py · test_dags.py
 artifacts/        model.joblib · metrics.json · curves.json · fairness.json ·
-                  feature_importance.json · improvement_log.json · scores.parquet   (gerados)
+                  feature_importance.json · improvement_log.json · scores.parquet ·
+                  diagnostico_idade.json · experimentos/teto_idade.json   (gerados)
 ```
 
 > A base bruta (>3 GB, 9 CSVs) fica em `data/risco_fraude/home-credit-default-risk/`
@@ -126,7 +152,7 @@ permanecem. Detalhes em [`MLOps/airflow/README.md`](MLOps/airflow/README.md).
 ### Manual — sem subir infraestrutura
 
 ```bash
-# 1) Ambiente (Python 3.14)
+# 1) Ambiente (Python 3.12+; a rodada oficial reproduz bit a bit em 3.12 e 3.14)
 python -m venv .venv && source .venv/bin/activate    # fish: source .venv/bin/activate.fish
 pip install -r requirements.txt
 
@@ -195,3 +221,4 @@ Tarefas em aberto: [`TODO.md`](TODO.md).
 Arquitetura, monitoramento e ações automatizadas: [`MLOps/Readme.md`](MLOps/Readme.md).
 Planejamento do projeto: [`PLAN.md`](PLAN.md) · Análise de escopo: [`OKR.md`](OKR.md) ·
 Documento de TCC: [`docs/TCC.md`](docs/TCC.md).
+Veredito sobre a faixa `<25`: [`docs/diagnostico-faixa-etaria.md`](docs/diagnostico-faixa-etaria.md).

@@ -21,7 +21,7 @@ ou por outra pessoa — sem precisar reconstruir o contexto.
 | ABT | ✅ 1.020 colunas — categóricas das tabelas relacionais recuperadas |
 | Modelo | ✅ LightGBM calibrado (servido), AUC 0,7868 · KS 0,4342 · Brier 0,0658 |
 | Rodada canônica | ✅ Congelada em `artifacts/`, é fonte única de verdade |
-| API | ✅ 27 endpoints, documentação própria, 113 testes passando |
+| API | ✅ 27 endpoints, documentação própria, 131 testes passando (11 pulados: DAG sem Airflow instalado) |
 | Dashboard | ✅ Executado e coberto por `tests/test_dashboard.py` |
 | Docker | ✅ Build e stack verificados, healthcheck falha corretamente |
 | Orquestração | ✅ Airflow 3.3.1 em Docker, DAG de 9 tasks a cada 7 dias |
@@ -29,7 +29,7 @@ ou por outra pessoa — sem precisar reconstruir o contexto.
 | Monitoramento de drift | ✅ `GET /model/psi` implementado e testado |
 | Notebook de avaliação | ✅ Reescrito lendo de `artifacts/`, re-executado nesta máquina |
 | Slides | ✅ `credit_scoring_deck_v3.pptx` — falta só um slide de calibração, à mão |
-| Fraqueza em `<25 anos` | ❌ Medida, **um conserto testado e rejeitado**, não resolvida |
+| Fraqueza em `<25 anos` | ✅ **Diagnosticada e com veredito**: teto de dado, não defeito de modelo. Causa declarada anteriormente (falta de histórico) **refutada**. Dois consertos testados e rejeitados. Ver [`docs/diagnostico-faixa-etaria.md`](docs/diagnostico-faixa-etaria.md) |
 
 ---
 
@@ -128,70 +128,91 @@ O que mudou:
 
 ---
 
-## 2. A fraqueza que não foi resolvida
+## 2. A fraqueza do `<25` — ✅ diagnosticada em 28/08/2026
 
-**O segmento de menores de 25 anos.** AUC 0,7319 [0,7012–0,7597] contra
-0,7868 [0,7806–0,7935] do modelo geral — os intervalos não se sobrepõem, então
-é fraqueza real e não ruído amostral.
+Veredito completo em [`docs/diagnostico-faixa-etaria.md`](docs/diagnostico-faixa-etaria.md).
+Resumo do que mudou nesta rodada:
 
-As seis correções da ABT (categóricas, flags de presença, scores externos
-combinados, comportamento de pagamento, janela recente, variáveis relativas à
-idade) melhoraram o modelo geral e a maioria dos segmentos, mas esse grupo
-praticamente não se moveu: **0,7364 → 0,7319**.
+**O critério que declarava a fraqueza era inválido.** Comparava o AUC do segmento com o IC
+do AUC **geral** — que contém o próprio segmento e é composto 77,6% por pares entre faixas
+etárias, comparações que nenhum AUC intra-faixa faz. E estava implementado em duas versões
+divergentes (`policy.py` unilateral, `routers/model.py` simétrica). Substituído pelo
+bootstrap da **diferença** contra os demais grupos do eixo
+(`Model/metrics_lib.py::auc_diff_bootstrap`), unificado nos quatro pontos.
 
-Mitigação vigente: régua de três faixas com faixa cinza dobrada, encaminhando
-esses casos a análise humana (`GET /model/decision-policy`).
+**A conclusão sobrevive ao critério correto**, e encolhe pouco: de −0,0549 para
+**−0,0514** (IC [−0,0827; −0,0205], p = 0,008). A classificação não muda: `<25` e `55-65`
+seguem sendo as fraquezas do eixo, e a faixa cinza dobrada continua valendo para os mesmos
+clientes.
 
-### Reponderação no treino — ❌ **testada e REJEITADA em 23/08/2026**
+**A causa que este arquivo declarava está errada.** O texto anterior dizia que a
+dificuldade era "ausência de sinal" e que "a fraqueza vem de ausência de histórico". Foi
+testado: uma coorte de 25–45 anos reamostrada até reproduzir o perfil de informação do
+jovem — mesma taxa de thin-file, mesmo número de scores externos, mesmo tempo de emprego,
+mesmo comprimento de histórico, 71 estratos, 99,9% de cobertura — atinge **AUC 0,7803**
+contra 0,7319 do jovem, e é melhor em 99,8% das réplicas. **Escassez de informação não
+explica o buraco.**
 
-Rodada `v4-pesos-idade`: `sample_weight` de 3× para `<25` e 2× para `55-65`
-(36.560 linhas de treino reponderadas). Implementação em
-`Model/train.py::build_sample_weight`, ligável em
-`Model/config.yaml → champion.sample_weight`.
+Pareando também pelo **nível** do score externo, o buraco cai de −0,0484 para −0,0308:
+~36% do efeito é "estar na região baixa do score externo, onde o modelo separa pior em
+qualquer idade", e não "ser jovem".
 
-| | v3 (vigente) | v4 (pesos) | Δ |
-|---|---|---|---|
-| AUC geral | 0,7871 | 0,7872 | +0,0001 |
-| KS | 0,4354 | 0,4359 | +0,0006 |
-| **AUC `<25`** (alvo) | **0,7319** | **0,7287** | **-0,0032** |
-| AUC `55-65` (alvo) | 0,7465 | 0,7481 | +0,0015 |
-| AUC thin-file | 0,7745 | 0,7731 | -0,0014 |
+### Modelo segmentado — ❌ testado e REJEITADO em 28/08/2026
 
-**Veredito: rejeitada.** O alvo principal — a faixa `<25` — **piorou**, e a
-maioria dos demais segmentos caiu junto. O ganho de +0,0001 no AUC geral
-não compensa: entra dentro do ruído e não era o objetivo.
+Seis variantes (`<25` e `<30`, três capacidades cada), mesma partição, mesmos 2.355
+clientes de teste. **Nenhuma supera o modelo geral (0,7319).** A melhor,
+`segmentado_<30` com `num_leaves=34`, fica em 0,7296. Registro em
+`artifacts/experimentos/teto_idade.json`; script em `Model/experimento_teto_idade.py`.
 
-**Por que provavelmente falhou** (hipótese, não medida): o modelo já usa
-`is_unbalance=true`, que reponderá as classes. Empilhar `sample_weight` por
-segmento distorce o objetivo duas vezes — o gradiente passa a perseguir uma
-distribuição que não é nem a real nem a balanceada. E, mais importante: a
-dificuldade nos jovens não parece ser de *alocação de capacidade*, e sim de
-**ausência de sinal**. Dar mais peso a linhas que não carregam informação não
-cria informação.
+Somado à reponderação já rejeitada (`v4-pesos-idade`), fecha o cerco: o modelo global já
+está no teto do segmento para este conjunto de variáveis.
 
-A rodada fica registrada em `artifacts/improvement_log.json` com
-`status: "rejeitada"` e o motivo. `GET /model/improvements` a devolve no campo
-`rejeitadas` — o que foi tentado e não funcionou faz parte do trabalho, e uma
-banca que perguntar merece a resposta.
+### Achado novo — viés de calibração no `<25`
 
-Para reproduzir: ligue `champion.sample_weight.enabled` em `Model/config.yaml`
-e rode `python Model/train.py --tag v4-pesos-idade`.
+`<25` é a **única** faixa com viés de nível estatisticamente significativo: prevê **13,4%**
+onde ocorrem **11,8%** (+1,6 pp, IC [+0,4; +2,9]). Causa identificada: a isotônica é
+ajustada globalmente. Reajustada só nos jovens, o gap vai a −0,0005.
 
-### Caminhos que ainda não foram tentados
-- **Modelo segmentado** para clientes de pouco histórico. Risco: com ~12 mil
-  jovens na base inteira, um modelo dedicado pode ficar pior que o geral.
-  Testar antes de adotar, com a mesma regra de aceite do ciclo. Dado o
-  resultado da reponderação, a expectativa é baixa: se o problema é falta de
-  sinal, treinar só naquele grupo não o cria.
-- **Dados alternativos** — telecom, contas de consumo, comportamento
-  transacional. É a recomendação técnica correta e a mais honesta:
-  a fraqueza vem de ausência de histórico, e histórico é exatamente o que um
-  cliente de 22 anos não tem. Não está na base do Kaggle; entraria como
-  proposta de evolução, não como implementação.
-- **Features de posição relativa dentro do segmento** (percentil de renda
-  dentro da faixa etária, por exemplo). Não testado. É a hipótese mais
-  promissora das que sobraram, porque cria contraste onde o valor absoluto
-  não distingue.
+**Mas não é um conserto gratuito:** o Brier não melhora (0,09584 → 0,09583) e a taxa de
+aprovação do `<25` no corte 0,09 **cai** de 47,6% para 44,8%. Corrige um viés agregado —
+relevante para perda esperada de carteira — sem melhorar decisão individual nem ampliar
+acesso. **Decisão de negócio pendente**, não adotado.
+
+### O que muda na recomendação de dados alternativos
+
+Ela era justificada por ausência de histórico, que foi refutado. Continua sendo uma via
+plausível, mas agora precisa de outro argumento: seria preciso mostrar que a fonte nova
+discrimina **dentro** do grupo jovem, não apenas que preenche lacunas.
+
+### A faixa `55-65` — ✅ diagnosticada em 28/08/2026
+
+Fraqueza confirmada (−0,0415, p = 0,004, n = 12.166), com causa **diferente** da do `<25`.
+
+**Não é aposentadoria.** A faixa é 68,4% aposentada contra 0,4–7,8% nas do meio, e a
+sanitização mata o bloco de emprego desse público (`DAYS_EMPLOYED = 365243` → nulo). Mas
+dentro da faixa, aposentado (0,7488) e ativo (0,7427) são indistinguíveis, e os
+aposentados de `45-55` vão **acima** da média (0,8065). Sem controlar idade o eixo
+aposentadoria parece explicativo (Δ −0,0313, p = 0,012); é confundimento.
+
+**Não é perfil de informação.** Coorte pareada tirada de `35-45`/`45-55` atinge 0,7906
+contra 0,7465 — e o `55-65` é pior em **100%** das réplicas.
+
+**Não se concentra em recorte nenhum** — gênero, tipo de contrato, thin-file e número de
+scores externos dão todos ~0,74.
+
+**A causa:** os três scores externos rendem ali o **pior de todas as faixas** (0,6288 /
+0,6301 / 0,6506 contra 0,6610 / 0,6733 / 0,6701 aos 35-45). O modelo agrega o normal em
+cima disso (ganho 0,0744, em linha com as melhores faixas) — ele só parte de um sinal
+pior. É deficiência **da fonte de dado**, não de modelagem.
+
+Contraste com o `<25`, que falha de outro jeito: lá o sinal também é fraco **e** o modelo
+agrega o mínimo de todas as faixas (0,0518). Detalhe em
+[`docs/diagnostico-faixa-etaria.md §8b`](docs/diagnostico-faixa-etaria.md).
+
+### O que ficou aberto
+- **O resíduo de −0,0308** é medido e específico da idade; a causa mecânica segue desconhecida.
+- **`AGE_YEARS` e `DAYS_BIRTH`** são ambos variáveis vivas e colineares — divide o ganho
+  entre duas colunas e subestima a importância da idade. Higiene, não conserto.
 
 ---
 
@@ -258,6 +279,17 @@ tolerância `1e-4` por causa disso.
 O formato CSV é exigido pelo enunciado (`/Dados/abt.csv`). Todo o resto do
 projeto usa o Parquet (310 MB). O CSV existe só para cumprir o formato.
 
+### 3.5b `scores.parquet` não tem todos os clientes
+`Model/train.py:493-502` concatena `id_tr`, `id_val` e `id_test` e **omite
+`id_cal`**: 30.751 clientes da fatia de calibração ficam de fora. `MLOps/app/db.py`
+faz LEFT JOIN, então eles aparecem em `GET /clients` com `split` e
+`proba_champion` nulos. Travado em `tests/test_split.py`.
+
+### 3.5c O gate do Airflow compara métricas diferentes
+`Model/train.py` grava no `improvement_log` o AUC **cru** do campeão, enquanto
+`dags/callables.py::_auc_servido` compara contra o AUC **calibrado**. O viés é de
++0,0003 contra um limiar de 0,01 — nunca disparou, mas está errado.
+
 ### 3.5 Sem autenticação na API
 Deliberado — projeto acadêmico servindo dados públicos do Kaggle. Em produção
 entrariam autenticação, rate limit e CORS restrito. Vale ter a frase pronta:
@@ -277,9 +309,14 @@ Foi ela que deu defensabilidade a este ciclo. Mantê-la:
    segmento-alvo sem piorar o global.
 4. **O que não funcionar sai — e é registrado.** Foi assim que o trabalho pôde
    afirmar honestamente que a faixa `<25` não cedeu.
-5. **Todo AUC de segmento acompanhado do intervalo de confiança.** Sem ele não
-   se distingue fraqueza de ruído, e essa distinção mudou a conclusão do
-   trabalho (thin-file saiu da lista de fraquezas).
+5. **Fraqueza de segmento se declara pelo IC da DIFERENÇA**, nunca comparando
+   com o AUC geral — que contém o próprio segmento e é composto em sua maior
+   parte por pares entre grupos. Use `metrics_lib.auc_diff_bootstrap`. O
+   critério antigo (IC do grupo sem sobrepor o IC geral) era descalibrado; ver
+   `docs/diagnostico-faixa-etaria.md §5`.
+6. **Toda causa afirmada precisa de teste.** "A fraqueza vem de X" é hipótese
+   até existir a coorte pareada que isole X. Foi assim que a causa declarada
+   para o `<25` caiu.
 
 Depois de qualquer re-treino:
 ```bash
